@@ -1,0 +1,4 @@
+# Keep local secrets out of Cursor / AI indexing (still gitignored separately)
+.dev.vars
+.env
+.env.*
