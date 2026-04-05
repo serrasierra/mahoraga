@@ -70,6 +70,22 @@ export interface SocialSnapshotCacheEntry {
   sources: string[];
 }
 
+export interface SignalActionability {
+  is_actionable: boolean;
+  reason:
+    | "ok"
+    | "no_price"
+    | "asset_not_found"
+    | "asset_not_tradable"
+    | "exchange_not_allowed"
+    | "crypto_symbol_not_configured"
+    | "lookup_failed";
+  price: number | null;
+  normalized_symbol?: string;
+  asset_class?: "us_equity" | "crypto";
+  checked_at: number;
+}
+
 // ---------------------------------------------------------------------------
 // Logging & cost tracking
 // ---------------------------------------------------------------------------
@@ -137,6 +153,8 @@ export interface PremarketPlan {
 export interface AgentState {
   config: import("../schemas/agent-config").AgentConfig;
   signalCache: Signal[];
+  actionableSignalCache: Signal[];
+  signalActionability: Record<string, SignalActionability>;
   positionEntries: Record<string, PositionEntry>;
   socialHistory: Record<string, SocialHistoryEntry[]>;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;

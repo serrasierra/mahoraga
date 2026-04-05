@@ -271,6 +271,7 @@
       </table>
 
       <h2>Optional Features</h2>
+      <p>Mahoraga uses actionable-only decision flow: symbols without valid Alpaca tradability or non-zero price are excluded from LLM trading decisions.</p>
       <table>
         <tr>
           <th>Setting</th>
@@ -407,7 +408,7 @@
         </tr>
         <tr>
           <td><code>GET /agent/status</code></td>
-          <td>Full status: account, positions, signals, config</td>
+          <td>Full status: account, positions, raw signals, actionable signals, config</td>
         </tr>
         <tr>
           <td><code>GET /agent/enable</code></td>
@@ -435,7 +436,7 @@
         </tr>
         <tr>
           <td><code>GET /agent/signals</code></td>
-          <td>Current signal cache</td>
+          <td>Current raw signal cache + actionable subset + actionability reasons</td>
         </tr>
         <tr>
           <td><code>GET /agent/trigger</code></td>

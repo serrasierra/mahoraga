@@ -14,6 +14,7 @@ MAHORAGA monitors social sentiment from StockTwits and Reddit, uses AI (OpenAI, 
 
 - **24/7 Operation** — Runs on Cloudflare Workers, no local machine required
 - **Multi-Source Signals** — StockTwits, Reddit (4 subreddits), Twitter confirmation
+- **Actionable Symbol Filtering** — LLM research and trade decisions run only on symbols with valid Alpaca tradability + price
 - **Multi-Provider LLM** — OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK or Cloudflare AI Gateway
 - **Crypto Trading** — Trade BTC, ETH, SOL around the clock
 - **Options Support** — High-conviction options plays
@@ -208,6 +209,7 @@ See `docs/harness.html` for the full customization guide.
 | `stop_loss_pct` | 5 | Stop loss percentage |
 | `min_sentiment_score` | 0.3 | Minimum sentiment to consider |
 | `min_analyst_confidence` | 0.6 | Minimum LLM confidence to trade |
+| `crypto_symbols` | BTC/USD, ETH/USD, SOL/USD | Configured crypto universe for actionable crypto decisions |
 | `options_enabled` | false | Enable options trading |
 | `crypto_enabled` | false | Enable 24/7 crypto trading |
 | `llm_model` | gpt-4o-mini | Research model (cheap, for bulk analysis) |
@@ -250,6 +252,12 @@ npx wrangler secret put LLM_PROVIDER      # Set to "ai-sdk"
 npx wrangler secret put LLM_MODEL         # Set to "anthropic/claude-sonnet-4"
 npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
 ```
+
+### Actionable Signal Notes
+
+- `signals` in status can include raw social candidates for observability.
+- Trade decisions and signal-level LLM research use the actionable subset only.
+- A symbol is actionable when Mahoraga can resolve a tradable Alpaca instrument and fetch a non-zero latest price.
 
 ## API Endpoints
 

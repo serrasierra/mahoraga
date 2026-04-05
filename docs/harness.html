@@ -204,7 +204,7 @@
         <li><code>env</code>, <code>config</code>, <code>llm</code> — environment bindings, merged configuration, and the LLM provider.</li>
         <li><code>broker</code> — a <code>PolicyEngine</code>-wrapped broker. Call <code>ctx.broker.buy()</code> and <code>ctx.broker.sell()</code> to place trades; the policy engine validates risk limits before execution.</li>
         <li><code>state</code> — per-strategy key/value state. Use <code>ctx.state.get(key)</code> and <code>ctx.state.set(key, value)</code> to persist data across alarm cycles.</li>
-        <li><code>signals</code> — the current signal cache (all gathered signals from the current cycle).</li>
+        <li><code>signals</code> — the current actionable signal cache (gathered symbols that passed tradability + price checks).</li>
         <li><code>log</code>, <code>trackLLMCost</code>, <code>sleep</code> — logging, LLM cost tracking, and async sleep utilities.</li>
       </ul>
 
@@ -374,6 +374,10 @@ export const activeStrategy = myStrategy;</code></pre>
 
       <div class="note">
         <strong>Tip:</strong> The harness stores state in Durable Object storage. To reset state, redeploy with a new migration tag in <code>wrangler.jsonc</code>.
+      </div>
+
+      <div class="note">
+        <strong>Actionable filtering:</strong> Raw social symbols may still appear in status for observability, but strategy LLM research and trade decisions use actionable symbols only (tradable + priced on Alpaca).
       </div>
 
       <p>For all configuration options and API endpoints, see <a href="./configuration.html">Configuration</a>.</p>

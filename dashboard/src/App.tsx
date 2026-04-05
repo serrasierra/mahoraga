@@ -9,7 +9,17 @@ import { SetupWizard } from './components/SetupWizard'
 import { LineChart, Sparkline } from './components/LineChart'
 import { NotificationBell } from './components/NotificationBell'
 import { Tooltip, TooltipContent } from './components/Tooltip'
-import type { Status, Config, LogEntry, Signal, Position, SignalResearch, PortfolioSnapshot } from './types'
+import { getActionabilityView } from './utils/signalActionability'
+import type {
+  Status,
+  Config,
+  LogEntry,
+  Signal,
+  Position,
+  SignalResearch,
+  PortfolioSnapshot,
+  SignalActionability,
+} from './types'
 
 const API_BASE = '/api'
 
@@ -219,9 +229,13 @@ export default function App() {
   const account = status?.account
   const positions = status?.positions || []
   const signals = status?.signals || []
+  const signalActionability: Record<string, SignalActionability> = status?.signalActionability || {}
+  const actionableSignals = status?.actionableSignals || []
   const logs = status?.logs || []
   const costs = status?.costs || { total_usd: 0, calls: 0, tokens_in: 0, tokens_out: 0 }
   const config = status?.config
+  const actionableSymbols = new Set(actionableSignals.map((s: Signal) => s.symbol))
+  const actionableSignalCount = signals.filter((s: Signal) => actionableSymbols.has(s.symbol)).length
   const isMarketOpen = status?.clock?.is_open ?? false
 
   const startingEquity = config?.starting_equity || 100000
@@ -627,61 +641,84 @@ export default function App() {
 
           {/* Row 3: Signals, Activity, Research */}
           <div className="col-span-4 md:col-span-4 lg:col-span-4">
-            <Panel title="ACTIVE SIGNALS" titleRight={signals.length.toString()} className="h-80">
+            <Panel
+              title="ACTIVE SIGNALS"
+              titleRight={`${actionableSignalCount}/${signals.length} actionable`}
+              className="h-80"
+            >
               <div className="overflow-y-auto h-full space-y-1">
                 {signals.length === 0 ? (
                   <div className="text-hud-text-dim text-sm py-4 text-center">Gathering signals...</div>
                 ) : (
-                  signals.slice(0, 20).map((sig: Signal, i: number) => (
-                    <Tooltip
-                      key={`${sig.symbol}-${sig.source}-${i}`}
-                      position="right"
-                      content={
-                        <TooltipContent
-                          title={`${sig.symbol} - ${sig.source.toUpperCase()}`}
-                          items={[
-                            { label: 'Sentiment', value: `${(sig.sentiment * 100).toFixed(0)}%`, color: getSentimentColor(sig.sentiment) },
-                            { label: 'Volume', value: sig.volume },
-                            ...(sig.bullish !== undefined ? [{ label: 'Bullish', value: sig.bullish, color: 'text-hud-success' }] : []),
-                            ...(sig.bearish !== undefined ? [{ label: 'Bearish', value: sig.bearish, color: 'text-hud-error' }] : []),
-                            ...(sig.score !== undefined ? [{ label: 'Score', value: sig.score }] : []),
-                            ...(sig.upvotes !== undefined ? [{ label: 'Upvotes', value: sig.upvotes }] : []),
-                            ...(sig.momentum !== undefined ? [{ label: 'Momentum', value: `${sig.momentum >= 0 ? '+' : ''}${sig.momentum.toFixed(2)}%` }] : []),
-                            ...(sig.price !== undefined ? [{ label: 'Price', value: formatCurrency(sig.price) }] : []),
-                          ]}
-                          description={sig.reason}
-                        />
-                      }
-                    >
-                      <motion.div 
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.02 }}
-                        className={clsx(
-                          "flex items-center justify-between py-1 px-2 border-b border-hud-line/10 hover:bg-hud-line/10 cursor-help",
-                          sig.isCrypto && "bg-hud-warning/5"
-                        )}
+                  signals.slice(0, 20).map((sig: Signal, i: number) => {
+                    const actionability = signalActionability[sig.symbol]
+                    const actionabilityView = getActionabilityView(sig.symbol, actionableSymbols, signalActionability)
+                    const isActionable = actionabilityView.isActionable
+                    const actionabilityLabel = actionabilityView.reasonLabel
+
+                    return (
+                      <Tooltip
+                        key={`${sig.symbol}-${sig.source}-${i}`}
+                        position="right"
+                        content={
+                          <TooltipContent
+                            title={`${sig.symbol} - ${sig.source.toUpperCase()}`}
+                            items={[
+                              {
+                                label: 'Actionable',
+                                value: isActionable ? 'YES' : `NO (${actionabilityLabel})`,
+                                color: isActionable ? 'text-hud-success' : 'text-hud-warning',
+                              },
+                              { label: 'Sentiment', value: `${(sig.sentiment * 100).toFixed(0)}%`, color: getSentimentColor(sig.sentiment) },
+                              { label: 'Volume', value: sig.volume },
+                              ...(sig.bullish !== undefined ? [{ label: 'Bullish', value: sig.bullish, color: 'text-hud-success' }] : []),
+                              ...(sig.bearish !== undefined ? [{ label: 'Bearish', value: sig.bearish, color: 'text-hud-error' }] : []),
+                              ...(sig.score !== undefined ? [{ label: 'Score', value: sig.score }] : []),
+                              ...(sig.upvotes !== undefined ? [{ label: 'Upvotes', value: sig.upvotes }] : []),
+                              ...(sig.momentum !== undefined ? [{ label: 'Momentum', value: `${sig.momentum >= 0 ? '+' : ''}${sig.momentum.toFixed(2)}%` }] : []),
+                              ...(sig.price !== undefined ? [{ label: 'Price', value: formatCurrency(sig.price) }] : []),
+                              ...(actionability?.price ? [{ label: 'Tradable Price', value: formatCurrency(actionability.price) }] : []),
+                            ]}
+                            description={sig.reason}
+                          />
+                        }
                       >
-                        <div className="flex items-center gap-2">
-                          {sig.isCrypto && <span className="text-hud-warning text-xs">₿</span>}
-                          <span className="hud-value-sm">{sig.symbol}</span>
-                          <span className={clsx('hud-label', sig.isCrypto ? 'text-hud-warning' : '')}>{sig.source.toUpperCase()}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          {sig.isCrypto && sig.momentum !== undefined ? (
-                            <span className={clsx('hud-label hidden sm:inline', sig.momentum >= 0 ? 'text-hud-success' : 'text-hud-error')}>
-                              {sig.momentum >= 0 ? '+' : ''}{sig.momentum.toFixed(1)}%
-                            </span>
-                          ) : (
-                            <span className="hud-label hidden sm:inline">VOL {sig.volume}</span>
+                        <motion.div 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.02 }}
+                          className={clsx(
+                            "flex items-center justify-between py-1 px-2 border-b border-hud-line/10 hover:bg-hud-line/10 cursor-help",
+                            sig.isCrypto && "bg-hud-warning/5",
+                            !isActionable && "opacity-65"
                           )}
-                          <span className={clsx('hud-value-sm', getSentimentColor(sig.sentiment))}>
-                            {(sig.sentiment * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </motion.div>
-                    </Tooltip>
-                  ))
+                        >
+                          <div className="flex items-center gap-2">
+                            {sig.isCrypto && <span className="text-hud-warning text-xs">₿</span>}
+                            <span className="hud-value-sm">{sig.symbol}</span>
+                            <span className={clsx('hud-label', sig.isCrypto ? 'text-hud-warning' : '')}>{sig.source.toUpperCase()}</span>
+                            {!isActionable && (
+                              <span className="hud-label text-hud-warning hidden sm:inline">
+                                NON-ACTIONABLE
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {sig.isCrypto && sig.momentum !== undefined ? (
+                              <span className={clsx('hud-label hidden sm:inline', sig.momentum >= 0 ? 'text-hud-success' : 'text-hud-error')}>
+                                {sig.momentum >= 0 ? '+' : ''}{sig.momentum.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="hud-label hidden sm:inline">VOL {sig.volume}</span>
+                            )}
+                            <span className={clsx('hud-value-sm', getSentimentColor(sig.sentiment))}>
+                              {(sig.sentiment * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        </motion.div>
+                      </Tooltip>
+                    )
+                  })
                 )}
               </div>
             </Panel>

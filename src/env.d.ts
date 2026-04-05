@@ -34,6 +34,9 @@ export interface Env {
   DEFAULT_COOLDOWN_MINUTES: string;
   DEFAULT_MAX_OPEN_POSITIONS: string;
   DEFAULT_APPROVAL_TTL_SECONDS: string;
+
+  /** Optional: ms to wait between per-symbol LLM research calls (default 500). Raise on low OpenAI RPM tiers (e.g. 20000 for ~3 RPM). */
+  SIGNAL_RESEARCH_GAP_MS?: string;
 }
 
 declare module "cloudflare:workers" {

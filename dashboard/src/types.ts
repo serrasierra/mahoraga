@@ -35,6 +35,22 @@ export interface Signal {
   price?: number
 }
 
+export interface SignalActionability {
+  is_actionable: boolean
+  reason:
+    | 'ok'
+    | 'no_price'
+    | 'asset_not_found'
+    | 'asset_not_tradable'
+    | 'exchange_not_allowed'
+    | 'crypto_symbol_not_configured'
+    | 'lookup_failed'
+  price: number | null
+  normalized_symbol?: string
+  asset_class?: 'us_equity' | 'crypto'
+  checked_at: number
+}
+
 export interface LogEntry {
   timestamp: string
   agent: string
@@ -197,6 +213,8 @@ export interface Status {
   clock: Clock | null
   config: Config
   signals: Signal[]
+  actionableSignals?: Signal[]
+  signalActionability?: Record<string, SignalActionability>
   logs: LogEntry[]
   costs: CostTracker
   lastAnalystRun: number

@@ -95,6 +95,8 @@ export const DEFAULT_CONFIG: AgentConfig = {
 export const DEFAULT_STATE: AgentState = {
   config: DEFAULT_CONFIG,
   signalCache: [],
+  actionableSignalCache: [],
+  signalActionability: {},
   positionEntries: {},
   socialHistory: {},
   socialSnapshotCache: {},

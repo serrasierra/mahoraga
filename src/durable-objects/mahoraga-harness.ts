@@ -16,6 +16,7 @@ import type {
   LogEntry,
   ResearchResult,
   Signal,
+  SignalActionability,
   SocialHistoryEntry,
   SocialSnapshotCacheEntry,
 } from "../core/types";
@@ -29,6 +30,7 @@ import { safeValidateAgentConfig } from "../schemas/agent-config";
 import { createD1Client } from "../storage/d1/client";
 import { activeStrategy } from "../strategy";
 import { DEFAULT_STATE } from "../strategy/default/config";
+import { determineSignalActionability } from "./actionability";
 import {
   checkTwitterBreakingNews,
   gatherTwitterConfirmation,
@@ -50,6 +52,7 @@ export class MahoragaHarness extends DurableObject<Env> {
   private _etDayFormatter: Intl.DateTimeFormat | null = null;
   private discordCooldowns: Map<string, number> = new Map();
   private readonly DISCORD_COOLDOWN_MS = 30 * 60 * 1000;
+  private readonly ACTIONABILITY_TTL_MS = 120_000;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -171,7 +174,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           (self.state as unknown as Record<string, unknown>)[key] = value;
         },
       },
-      signals: this.state.signalCache,
+      signals: this.getActionableSignals(),
       positionEntries: this.state.positionEntries,
     };
   }
@@ -378,9 +381,65 @@ export class MahoragaHarness extends DurableObject<Env> {
       .slice(0, MAX_SIGNALS);
 
     this.state.signalCache = freshSignals;
+    await this.refreshActionableSignals(freshSignals);
     this.state.lastDataGatherRun = now;
 
-    this.log("System", "data_gathered", { ...counts, total: this.state.signalCache.length });
+    this.log("System", "data_gathered", {
+      ...counts,
+      total: this.state.signalCache.length,
+      actionable_total: this.state.actionableSignalCache.length,
+      filtered_non_actionable: this.state.signalCache.length - this.state.actionableSignalCache.length,
+    });
+  }
+
+  private getActionabilityFor(symbol: string): SignalActionability | undefined {
+    const actionability = this.state.signalActionability[symbol];
+    if (!actionability) return undefined;
+    if (Date.now() - actionability.checked_at > this.ACTIONABILITY_TTL_MS) return undefined;
+    return actionability;
+  }
+
+  private async evaluateSignalActionability(signal: Signal): Promise<SignalActionability> {
+    const symbol = signal.symbol;
+    const cached = this.getActionabilityFor(symbol);
+    if (cached) return cached;
+
+    const alpaca = createAlpacaProviders(this.env);
+    const allowedExchanges = this.state.config.allowed_exchanges ?? ["NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"];
+    return determineSignalActionability({
+      signal,
+      cryptoSymbols: this.state.config.crypto_symbols || [],
+      allowedExchanges,
+      nowMs: Date.now(),
+      getAsset: async (s) => alpaca.trading.getAsset(s).catch(() => null),
+      getEquitySnapshot: async (s) => alpaca.marketData.getSnapshot(s).catch(() => null),
+      getCryptoSnapshot: async (s) => alpaca.marketData.getCryptoSnapshot(s).catch(() => null),
+    });
+  }
+
+  private async refreshActionableSignals(signals: Signal[]): Promise<void> {
+    const uniqueBySymbol = new Map<string, Signal>();
+    for (const signal of signals) {
+      if (!uniqueBySymbol.has(signal.symbol)) uniqueBySymbol.set(signal.symbol, signal);
+    }
+
+    const nextActionability: Record<string, SignalActionability> = {};
+    for (const [symbol, signal] of uniqueBySymbol) {
+      const actionability = await this.evaluateSignalActionability(signal);
+      nextActionability[symbol] = actionability;
+    }
+    this.state.signalActionability = nextActionability;
+
+    this.state.actionableSignalCache = signals.filter((signal) => {
+      return this.state.signalActionability[signal.symbol]?.is_actionable === true;
+    });
+  }
+
+  private getActionableSignals(): Signal[] {
+    if (this.state.actionableSignalCache.length > 0) return this.state.actionableSignalCache;
+    return this.state.signalCache.filter((signal) => {
+      return this.state.signalActionability[signal.symbol]?.is_actionable === true;
+    });
   }
 
   private buildSocialSnapshot(
@@ -486,7 +545,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const positions = await ctx.broker.getPositions();
     const heldSymbols = new Set(positions.map((p) => p.symbol));
 
-    const allSignals = this.state.signalCache;
+    const allSignals = this.getActionableSignals();
     const notHeld = allSignals.filter((s) => !heldSymbols.has(s.symbol));
     const aboveThreshold = notHeld.filter((s) => s.raw_sentiment >= this.state.config.min_sentiment_score);
     const candidates = aboveThreshold.sort((a, b) => b.sentiment - a.sentiment).slice(0, limit);
@@ -512,11 +571,16 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
     }
 
+    const gapRaw = this.env.SIGNAL_RESEARCH_GAP_MS;
+    const gapMsParsed = gapRaw ? Number.parseInt(gapRaw, 10) : 500;
+    const gapMs =
+      Number.isFinite(gapMsParsed) && gapMsParsed >= 0 ? gapMsParsed : 500;
+
     const results: ResearchResult[] = [];
     for (const [symbol, data] of aggregated) {
       const analysis = await this.callSignalResearch(ctx, symbol, data.sentiment, data.sources);
       if (analysis) results.push(analysis);
-      await this.sleep(500);
+      await this.sleep(gapMs);
     }
 
     return results;
@@ -752,13 +816,16 @@ export class MahoragaHarness extends DurableObject<Env> {
       if (result) heldSymbols.delete(exit.symbol);
     }
 
-    if (positions.length >= this.state.config.max_positions || this.state.signalCache.length === 0) return;
+    const actionableSignals = this.getActionableSignals();
+    if (positions.length >= this.state.config.max_positions || actionableSignals.length === 0) return;
+    const actionableSymbols = new Set(actionableSignals.map((s) => s.symbol));
 
     // Strategy entry decisions from cached research
-    const research = Object.values(this.state.signalResearch);
+    const research = Object.values(this.state.signalResearch).filter((r) => actionableSymbols.has(r.symbol));
     const entries = activeStrategy.selectEntries(ctx, research, positions, account);
 
     for (const entry of entries) {
+      if (!actionableSymbols.has(entry.symbol)) continue;
       if (heldSymbols.has(entry.symbol)) continue;
       if (positions.length >= this.state.config.max_positions) break;
 
@@ -766,7 +833,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
       // Twitter confirmation
       if (isTwitterEnabled(ctx)) {
-        const originalSignal = this.state.signalCache.find((s) => s.symbol === entry.symbol);
+        const originalSignal = actionableSignals.find((s) => s.symbol === entry.symbol);
         if (originalSignal) {
           const twitterConfirm = await gatherTwitterConfirmation(ctx, entry.symbol, originalSignal.sentiment);
           if (twitterConfirm) {
@@ -795,7 +862,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       const result = await ctx.broker.buy(entry.symbol, entry.notional, entry.reason);
       if (result) {
         heldSymbols.add(entry.symbol);
-        const originalSignal = this.state.signalCache.find((s) => s.symbol === entry.symbol);
+        const originalSignal = actionableSignals.find((s) => s.symbol === entry.symbol);
         const aggregatedSocial = socialSnapshot[entry.symbol];
         this.state.positionEntries[entry.symbol] = {
           symbol: entry.symbol,
@@ -814,7 +881,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
 
     // LLM analyst for additional recommendations
-    const analysis = await this.callAnalystLLM(ctx, this.state.signalCache, positions, account);
+    const analysis = await this.callAnalystLLM(ctx, actionableSignals, positions, account);
     const entrySymbols = new Set(entries.map((e) => e.symbol));
 
     for (const rec of analysis.recommendations) {
@@ -848,6 +915,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
 
       if (rec.action === "BUY") {
+        if (!actionableSymbols.has(rec.symbol)) continue;
         if (positions.length >= this.state.config.max_positions) continue;
         if (heldSymbols.has(rec.symbol)) continue;
         if (entrySymbols.has(rec.symbol)) continue;
@@ -861,7 +929,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
         const result = await ctx.broker.buy(rec.symbol, notional, rec.reasoning);
         if (result) {
-          const originalSignal = this.state.signalCache.find((s) => s.symbol === rec.symbol);
+          const originalSignal = actionableSignals.find((s) => s.symbol === rec.symbol);
           const aggregatedSocial = socialSnapshot[rec.symbol];
           heldSymbols.add(rec.symbol);
           this.state.positionEntries[rec.symbol] = {
@@ -931,16 +999,16 @@ export class MahoragaHarness extends DurableObject<Env> {
 
   private async runPreMarketAnalysis(ctx: StrategyContext): Promise<void> {
     const [account, positions] = await Promise.all([ctx.broker.getAccount(), ctx.broker.getPositions()]);
-
-    if (!account || this.state.signalCache.length === 0) return;
+    const actionableSignals = this.getActionableSignals();
+    if (!account || actionableSignals.length === 0) return;
 
     this.log("System", "premarket_analysis_starting", {
-      signals: this.state.signalCache.length,
+      signals: actionableSignals.length,
       researched: Object.keys(this.state.signalResearch).length,
     });
 
     const signalResearch = await this.researchTopSignals(ctx, 10);
-    const analysis = await this.callAnalystLLM(ctx, this.state.signalCache, positions, account);
+    const analysis = await this.callAnalystLLM(ctx, actionableSignals, positions, account);
 
     this.state.premarketPlan = {
       timestamp: Date.now(),
@@ -982,6 +1050,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const [account, positions] = await Promise.all([ctx.broker.getAccount(), ctx.broker.getPositions()]);
     if (!account) return;
 
+    const actionableSignals = this.getActionableSignals();
     const heldSymbols = new Set(positions.map((p) => p.symbol));
     const socialSnapshot = this.getSocialSnapshotCache();
 
@@ -999,6 +1068,11 @@ export class MahoragaHarness extends DurableObject<Env> {
     // Then buys
     for (const rec of this.state.premarketPlan.recommendations) {
       if (rec.action === "BUY" && rec.confidence >= this.state.config.min_analyst_confidence) {
+        const isActionable = this.state.signalActionability[rec.symbol]?.is_actionable === true;
+        if (!isActionable) {
+          this.log("System", "premarket_buy_skipped_non_actionable", { symbol: rec.symbol });
+          continue;
+        }
         if (heldSymbols.has(rec.symbol)) continue;
         if (positions.length >= this.state.config.max_positions) break;
 
@@ -1012,7 +1086,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         const result = await ctx.broker.buy(rec.symbol, notional, `Pre-market plan: ${rec.reasoning}`);
         if (result) {
           heldSymbols.add(rec.symbol);
-          const originalSignal = this.state.signalCache.find((s) => s.symbol === rec.symbol);
+          const originalSignal = actionableSignals.find((s) => s.symbol === rec.symbol);
           const aggregatedSocial = socialSnapshot[rec.symbol];
           this.state.positionEntries[rec.symbol] = {
             symbol: rec.symbol,
@@ -1111,7 +1185,11 @@ export class MahoragaHarness extends DurableObject<Env> {
         case "costs":
           return this.jsonResponse({ costs: this.state.costTracker });
         case "signals":
-          return this.jsonResponse({ signals: this.state.signalCache });
+          return this.jsonResponse({
+            signals: this.state.signalCache,
+            actionableSignals: this.state.actionableSignalCache,
+            signalActionability: this.state.signalActionability,
+          });
         case "history":
           return this.handleGetHistory(url);
         case "trigger":
@@ -1171,6 +1249,8 @@ export class MahoragaHarness extends DurableObject<Env> {
         clock,
         config: this.state.config,
         signals: this.state.signalCache,
+        actionableSignals: this.state.actionableSignalCache,
+        signalActionability: this.state.signalActionability,
         logs: this.state.logs.slice(-100),
         costs: this.state.costTracker,
         lastAnalystRun: this.state.lastAnalystRun,
@@ -1200,6 +1280,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     this.state.config = validation.data;
     this.initializeLLM();
+    await this.refreshActionableSignals(this.state.signalCache);
     await this.persist();
     return this.jsonResponse({ ok: true, config: this.state.config });
   }
