@@ -40,6 +40,7 @@
 	// Optional:
 	// - ALPACA_PAPER ("true" for paper trading)
 	// - TWITTER_BEARER_TOKEN
+	// - POLYGON_API_KEY (enables optional polygon_news gatherer)
 	// - DISCORD_WEBHOOK_URL
 	"d1_databases": [
 		{

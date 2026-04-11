@@ -31,6 +31,7 @@ import { createD1Client } from "../storage/d1/client";
 import { activeStrategy } from "../strategy";
 import { DEFAULT_STATE } from "../strategy/default/config";
 import { determineSignalActionability } from "./actionability";
+import { getActionabilityKey, selectUniqueActionabilityCandidates } from "./actionability-keys";
 import {
   checkTwitterBreakingNews,
   gatherTwitterConfirmation,
@@ -53,6 +54,8 @@ export class MahoragaHarness extends DurableObject<Env> {
   private discordCooldowns: Map<string, number> = new Map();
   private readonly DISCORD_COOLDOWN_MS = 30 * 60 * 1000;
   private readonly ACTIONABILITY_TTL_MS = 120_000;
+  private readonly ACTIONABILITY_EVAL_CAP_PER_CYCLE = 60;
+  private readonly ACTIONABILITY_INPUT_CAP = 120;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -381,7 +384,8 @@ export class MahoragaHarness extends DurableObject<Env> {
       .slice(0, MAX_SIGNALS);
 
     this.state.signalCache = freshSignals;
-    await this.refreshActionableSignals(freshSignals);
+    const actionabilityInputSignals = freshSignals.slice(0, this.ACTIONABILITY_INPUT_CAP);
+    await this.refreshActionableSignals(actionabilityInputSignals);
     this.state.lastDataGatherRun = now;
 
     this.log("System", "data_gathered", {
@@ -399,12 +403,14 @@ export class MahoragaHarness extends DurableObject<Env> {
     return actionability;
   }
 
-  private async evaluateSignalActionability(signal: Signal): Promise<SignalActionability> {
+  private async evaluateSignalActionability(
+    signal: Signal,
+    alpaca = createAlpacaProviders(this.env)
+  ): Promise<SignalActionability> {
     const symbol = signal.symbol;
     const cached = this.getActionabilityFor(symbol);
     if (cached) return cached;
 
-    const alpaca = createAlpacaProviders(this.env);
     const allowedExchanges = this.state.config.allowed_exchanges ?? ["NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"];
     return determineSignalActionability({
       signal,
@@ -418,15 +424,38 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async refreshActionableSignals(signals: Signal[]): Promise<void> {
-    const uniqueBySymbol = new Map<string, Signal>();
-    for (const signal of signals) {
-      if (!uniqueBySymbol.has(signal.symbol)) uniqueBySymbol.set(signal.symbol, signal);
+    const nowMs = Date.now();
+    const cryptoSymbols = this.state.config.crypto_symbols || [];
+    const evaluationCandidates = selectUniqueActionabilityCandidates(
+      signals,
+      cryptoSymbols,
+      this.ACTIONABILITY_EVAL_CAP_PER_CYCLE
+    );
+    const existingByKey = new Map<string, SignalActionability>();
+    for (const [symbol, actionability] of Object.entries(this.state.signalActionability)) {
+      const key = getActionabilityKey(symbol, cryptoSymbols);
+      const existing = existingByKey.get(key);
+      if (!existing || actionability.checked_at > existing.checked_at) {
+        existingByKey.set(key, actionability);
+      }
+    }
+
+    const actionabilityByKey = new Map(existingByKey);
+    const alpaca = createAlpacaProviders(this.env);
+    for (const [key, signal] of evaluationCandidates) {
+      const cached = actionabilityByKey.get(key);
+      const isFresh = cached && nowMs - cached.checked_at <= this.ACTIONABILITY_TTL_MS;
+      if (isFresh) continue;
+      const actionability = await this.evaluateSignalActionability(signal, alpaca);
+      actionabilityByKey.set(key, actionability);
     }
 
     const nextActionability: Record<string, SignalActionability> = {};
-    for (const [symbol, signal] of uniqueBySymbol) {
-      const actionability = await this.evaluateSignalActionability(signal);
-      nextActionability[symbol] = actionability;
+    for (const signal of signals) {
+      const key = getActionabilityKey(signal.symbol, cryptoSymbols);
+      const actionability = actionabilityByKey.get(key);
+      if (!actionability) continue;
+      nextActionability[signal.symbol] = actionability;
     }
     this.state.signalActionability = nextActionability;
 
@@ -573,8 +602,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     const gapRaw = this.env.SIGNAL_RESEARCH_GAP_MS;
     const gapMsParsed = gapRaw ? Number.parseInt(gapRaw, 10) : 500;
-    const gapMs =
-      Number.isFinite(gapMsParsed) && gapMsParsed >= 0 ? gapMsParsed : 500;
+    const gapMs = Number.isFinite(gapMsParsed) && gapMsParsed >= 0 ? gapMsParsed : 500;
 
     const results: ResearchResult[] = [];
     for (const [symbol, data] of aggregated) {

@@ -6,14 +6,14 @@ An autonomous, LLM-powered trading agent that runs 24/7 on Cloudflare Workers.
 
 [![Discord](https://img.shields.io/discord/1467592472158015553?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/vMFnHe2YBh)
 
-MAHORAGA monitors social sentiment from StockTwits and Reddit, uses AI (OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK) to analyze signals, and executes trades through Alpaca. It runs as a Cloudflare Durable Object with persistent state, automatic restarts, and 24/7 crypto trading support.
+MAHORAGA monitors social sentiment from StockTwits and Reddit, ingests optional Polygon news catalysts, uses AI (OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK) to analyze signals, and executes trades through Alpaca. It runs as a Cloudflare Durable Object with persistent state, automatic restarts, and 24/7 crypto trading support.
 
 <img width="1278" height="957" alt="dashboard" src="https://github.com/user-attachments/assets/56473ab6-e2c6-45fc-9e32-cf85e69f1a2d" />
 
 ## Features
 
 - **24/7 Operation** — Runs on Cloudflare Workers, no local machine required
-- **Multi-Source Signals** — StockTwits, Reddit (4 subreddits), Twitter confirmation
+- **Multi-Source Signals** — StockTwits, Reddit (4 subreddits), optional Polygon news, Twitter confirmation
 - **Actionable Symbol Filtering** — LLM research and trade decisions run only on symbols with valid Alpaca tradability + price
 - **Multi-Provider LLM** — OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK or Cloudflare AI Gateway
 - **Crypto Trading** — Trade BTC, ETH, SOL around the clock
@@ -84,6 +84,7 @@ npx wrangler secret put OPENAI_BASE_URL        # Optional: override OpenAI base 
 # Optional
 npx wrangler secret put ALPACA_PAPER         # "true" for paper trading (recommended)
 npx wrangler secret put TWITTER_BEARER_TOKEN
+npx wrangler secret put POLYGON_API_KEY      # Optional: enables polygon_news gatherer
 npx wrangler secret put DISCORD_WEBHOOK_URL
 npx wrangler secret put KILL_SWITCH_SECRET   # Emergency kill switch (separate from API token)
 ```
@@ -258,6 +259,7 @@ npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
 - `signals` in status can include raw social candidates for observability.
 - Trade decisions and signal-level LLM research use the actionable subset only.
 - A symbol is actionable when Mahoraga can resolve a tradable Alpaca instrument and fetch a non-zero latest price.
+- Cloudflare deployments with high symbol fanout should keep code-level actionability caps/dedupe enabled; `wrangler.jsonc` can also set `limits.subrequests` as a fallback guardrail.
 
 ## API Endpoints
 

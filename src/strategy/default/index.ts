@@ -17,6 +17,7 @@ import type { Strategy } from "../types";
 import { DEFAULT_CONFIG } from "./config";
 import { cryptoGatherer } from "./gatherers/crypto";
 import { planMarkerGatherer } from "./gatherers/plan-marker";
+import { polygonNewsGatherer } from "./gatherers/polygon-news";
 import { redditGatherer } from "./gatherers/reddit";
 import { secGatherer } from "./gatherers/sec";
 import { stocktwitsGatherer } from "./gatherers/stocktwits";
@@ -31,13 +32,7 @@ export const defaultStrategy: Strategy = {
   configSchema: null,
   defaultConfig: DEFAULT_CONFIG,
 
-  gatherers: [
-    planMarkerGatherer,
-    stocktwitsGatherer,
-    redditGatherer,
-    cryptoGatherer,
-    secGatherer,
-  ],
+  gatherers: [planMarkerGatherer, stocktwitsGatherer, redditGatherer, polygonNewsGatherer, cryptoGatherer, secGatherer],
 
   prompts: {
     researchSignal: researchSignalPrompt,

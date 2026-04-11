@@ -17,6 +17,7 @@ export const SOURCE_CONFIG = {
     reddit_stocks: 0.9,
     reddit_investing: 0.8,
     reddit_options: 0.85,
+    polygon_news: 0.88,
     twitter_fintwit: 0.95,
     twitter_news: 0.9,
     sec_8k: 0.95,
