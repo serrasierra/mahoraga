@@ -35,6 +35,22 @@ export interface Signal {
   price?: number
 }
 
+export interface SignalActionability {
+  is_actionable: boolean
+  reason:
+    | 'ok'
+    | 'no_price'
+    | 'asset_not_found'
+    | 'asset_not_tradable'
+    | 'exchange_not_allowed'
+    | 'crypto_symbol_not_configured'
+    | 'lookup_failed'
+  price: number | null
+  normalized_symbol?: string
+  asset_class?: 'us_equity' | 'crypto'
+  checked_at: number
+}
+
 export interface LogEntry {
   timestamp: string
   agent: string
@@ -48,6 +64,90 @@ export interface CostTracker {
   calls: number
   tokens_in: number
   tokens_out: number
+}
+
+export interface ExperimentThresholdCheck {
+  name: string
+  passed: boolean
+  value: number
+  baseline_value?: number
+  note?: string
+}
+
+export interface ExperimentVerdict {
+  passed: boolean
+  checks: ExperimentThresholdCheck[]
+}
+
+export interface ExperimentMetricsSnapshotData {
+  reliability: {
+    alarm_error_count: number
+    source_error_count: number
+    subrequest_error_count: number
+  }
+  signal_funnel: {
+    avg_total_signals: number
+    avg_actionable_signals: number
+    avg_actionable_ratio: number
+  }
+  decisions: {
+    researched_signals: number
+    buy_executed: number
+    sell_executed: number
+    verdict_buy: number
+    verdict_wait: number
+    verdict_skip: number
+  }
+  costs: {
+    total_usd_delta: number
+    calls_delta: number
+    tokens_in_delta: number
+    tokens_out_delta: number
+    cost_per_researched_signal: number
+    cost_per_executed_trade: number
+  }
+  returns: {
+    equity_start: number
+    equity_end: number
+    equity_change: number
+    return_pct: number
+    max_drawdown_pct: number
+  }
+}
+
+export interface ExperimentSnapshot {
+  id: string
+  experiment_id: string
+  label: string
+  captured_at: number
+  window_start: number
+  window_end: number
+  metrics: ExperimentMetricsSnapshotData
+  verdict: ExperimentVerdict
+}
+
+export interface ExperimentRun {
+  id: string
+  name: string
+  hypothesis?: string
+  change_notes?: string
+  started_at: number
+  ended_at: number | null
+  status: 'active' | 'completed'
+  baseline_snapshot_id: string | null
+  snapshots: ExperimentSnapshot[]
+}
+
+export interface ExperimentSummary {
+  id: string
+  name: string
+  hypothesis?: string
+  change_notes?: string
+  started_at: number
+  ended_at: number | null
+  status: 'active' | 'completed'
+  snapshots: number
+  latest_snapshot?: ExperimentSnapshot
 }
 
 export interface Config {
@@ -95,6 +195,32 @@ export interface Config {
   crypto_max_position_value?: number
   crypto_take_profit_pct?: number
   crypto_stop_loss_pct?: number
+
+  // Institutional signal sources
+  uoa_enabled?: boolean
+  uoa_max_candidates?: number
+  uoa_min_premium?: number
+  congressional_enabled?: boolean
+  congressional_max_candidates?: number
+  congressional_lookback_days?: number
+  contract_awards_enabled?: boolean
+  contract_awards_max_candidates?: number
+  contract_awards_lookback_days?: number
+
+  /** Free-tier: Finnhub general news bundle (requires FINNHUB_API_KEY) */
+  finnhub_enabled?: boolean
+  finnhub_max_symbols?: number
+  finnhub_cache_ttl_seconds?: number
+  finnhub_symbols?: string[]
+
+  /** Free-tier: FRED macro bias for SPY/QQQ (requires FRED_API_KEY) */
+  fred_enabled?: boolean
+  fred_series?: string[]
+  fred_cache_ttl_seconds?: number
+
+  /** Free-tier: Alternative.me crypto fear & greed (no key) */
+  crypto_fng_enabled?: boolean
+  crypto_fng_cache_ttl_seconds?: number
 
   // Custom ticker blacklist (insider trading restrictions, etc.)
   ticker_blacklist?: string[]
@@ -197,6 +323,8 @@ export interface Status {
   clock: Clock | null
   config: Config
   signals: Signal[]
+  actionableSignals?: Signal[]
+  signalActionability?: Record<string, SignalActionability>
   logs: LogEntry[]
   costs: CostTracker
   lastAnalystRun: number
@@ -210,4 +338,6 @@ export interface Status {
   premarketPlan?: PremarketPlan | null
   stalenessAnalysis?: Record<string, StalenessAnalysis>
   overnightActivity?: OvernightActivity
+  activeExperimentId?: string | null
+  experimentSummaries?: ExperimentSummary[]
 }

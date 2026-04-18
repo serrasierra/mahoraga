@@ -9,12 +9,45 @@ import { SetupWizard } from './components/SetupWizard'
 import { LineChart, Sparkline } from './components/LineChart'
 import { NotificationBell } from './components/NotificationBell'
 import { Tooltip, TooltipContent } from './components/Tooltip'
-import type { Status, Config, LogEntry, Signal, Position, SignalResearch, PortfolioSnapshot } from './types'
+import { getActionabilityView } from './utils/signalActionability'
+import type {
+  Status,
+  Config,
+  ExperimentRun,
+  ExperimentSummary,
+  LogEntry,
+  Signal,
+  Position,
+  SignalResearch,
+  PortfolioSnapshot,
+  SignalActionability,
+} from './types'
 
-const API_BASE = '/api'
+const API_BASE = (import.meta.env.VITE_MAHORAGA_API_BASE || '/api').replace(/\/$/, '')
+
+const HAS_VITE_WORKER_URL = Boolean(
+  typeof import.meta.env.VITE_MAHORAGA_API_BASE === 'string' && import.meta.env.VITE_MAHORAGA_API_BASE.trim() !== ''
+)
+
+/** URL for curl hint: matches what the app targets (Worker URL when built for hosted, else local wrangler port). */
+function getAgentEnableUrlForHint(): string {
+  if (API_BASE.startsWith('http://') || API_BASE.startsWith('https://')) {
+    return `${API_BASE.replace(/\/$/, '')}/enable`
+  }
+  const port = import.meta.env.VITE_WRANGLER_PORT || '8787'
+  return `http://localhost:${port}/agent/enable`
+}
+
+function isHostedSiteMissingWorkerUrl(): boolean {
+  if (typeof window === 'undefined') return false
+  const h = window.location.hostname
+  const isLocal = h === 'localhost' || h === '127.0.0.1'
+  if (isLocal) return false
+  return !HAS_VITE_WORKER_URL
+}
 
 function getApiToken(): string {
-  return localStorage.getItem('mahoraga_api_token') || (window as unknown as { VITE_MAHORAGA_API_TOKEN?: string }).VITE_MAHORAGA_API_TOKEN || ''
+  return localStorage.getItem('mahoraga_api_token') || ''
 }
 
 function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
@@ -144,6 +177,9 @@ export default function App() {
   const [time, setTime] = useState(new Date())
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([])
   const [portfolioPeriod, setPortfolioPeriod] = useState<'1D' | '1W' | '1M'>('1D')
+  const [experimentSummaries, setExperimentSummaries] = useState<ExperimentSummary[]>([])
+  const [activeExperimentId, setActiveExperimentId] = useState<string | null>(null)
+  const [experimentRunDetail, setExperimentRunDetail] = useState<ExperimentRun | null>(null)
 
   useEffect(() => {
     const checkSetup = async () => {
@@ -192,6 +228,27 @@ export default function App() {
   useEffect(() => {
     if (!setupChecked || showSetup) return
 
+    const fetchExperiments = async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/experiments`)
+        const data = await res.json()
+        if (data.ok && data.data) {
+          setExperimentSummaries(data.data.experiments || [])
+          setActiveExperimentId(data.data.activeExperimentId || null)
+        }
+      } catch {
+        // Keep dashboard resilient if experiments endpoint is temporarily unavailable.
+      }
+    }
+
+    fetchExperiments()
+    const experimentInterval = setInterval(fetchExperiments, 10000)
+    return () => clearInterval(experimentInterval)
+  }, [setupChecked, showSetup])
+
+  useEffect(() => {
+    if (!setupChecked || showSetup) return
+
     const loadPortfolioHistory = async () => {
       const history = await fetchPortfolioHistory(portfolioPeriod)
       if (history.length > 0) {
@@ -203,6 +260,28 @@ export default function App() {
     const historyInterval = setInterval(loadPortfolioHistory, 60000)
     return () => clearInterval(historyInterval)
   }, [setupChecked, showSetup, portfolioPeriod])
+
+  useEffect(() => {
+    const id = activeExperimentId || experimentSummaries.find((run) => run.status === 'completed')?.id
+    if (!id) {
+      setExperimentRunDetail(null)
+      return
+    }
+
+    const fetchExperimentDetail = async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/experiments/${id}`)
+        const data = await res.json()
+        if (data.ok) {
+          setExperimentRunDetail(data.data || null)
+        }
+      } catch {
+        // Non-blocking; panel will show whichever data is available.
+      }
+    }
+
+    fetchExperimentDetail()
+  }, [activeExperimentId, experimentSummaries])
 
   const handleSaveConfig = async (config: Config) => {
     const res = await authFetch(`${API_BASE}/config`, {
@@ -219,9 +298,28 @@ export default function App() {
   const account = status?.account
   const positions = status?.positions || []
   const signals = status?.signals || []
+  const signalActionability: Record<string, SignalActionability> = status?.signalActionability || {}
+  const actionableSignals = status?.actionableSignals || []
   const logs = status?.logs || []
   const costs = status?.costs || { total_usd: 0, calls: 0, tokens_in: 0, tokens_out: 0 }
   const config = status?.config
+  const activeExperiment = useMemo(
+    () => experimentSummaries.find((run) => run.id === activeExperimentId) || null,
+    [experimentSummaries, activeExperimentId]
+  )
+  const latestCompletedExperiment = useMemo(
+    () => experimentSummaries.find((run) => run.status === 'completed') || null,
+    [experimentSummaries]
+  )
+  const experimentForView = activeExperiment || latestCompletedExperiment
+  const baselineSnapshot = experimentRunDetail
+    ? experimentRunDetail.snapshots.find((s) => s.id === experimentRunDetail.baseline_snapshot_id) || null
+    : null
+  const latestSnapshot = experimentRunDetail
+    ? experimentRunDetail.snapshots[experimentRunDetail.snapshots.length - 1] || null
+    : null
+  const actionableSymbols = new Set(actionableSignals.map((s: Signal) => s.symbol))
+  const actionableSignalCount = signals.filter((s: Signal) => actionableSymbols.has(s.symbol)).length
   const isMarketOpen = status?.clock?.is_open ?? false
 
   const startingEquity = config?.starting_equity || 100000
@@ -336,15 +434,55 @@ export default function App() {
                   >
                     Save & Reload
                   </button>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('mahoraga_api_token')
+                      window.location.reload()
+                    }}
+                    className="hud-button w-full mt-2"
+                  >
+                    Clear Saved Token
+                  </button>
+                  <p className="text-[10px] text-hud-text-dim mt-2">
+                    Stored only in this browser localStorage.
+                  </p>
                 </div>
                 <p className="text-hud-text-dim text-xs">
                   Find your token in <code className="text-hud-primary">.dev.vars</code> (local) or Cloudflare secrets (deployed)
                 </p>
               </div>
             ) : (
-              <p className="text-hud-text-dim text-xs">
-                Enable the agent: <code className="text-hud-primary">curl -H "Authorization: Bearer $TOKEN" localhost:8787/agent/enable</code>
-              </p>
+              <div className="text-hud-text-dim text-xs text-left space-y-3">
+                {isHostedSiteMissingWorkerUrl() ? (
+                  <p className="bg-hud-panel border border-hud-warning/40 p-3 text-[11px] leading-relaxed">
+                    <span className="text-hud-warning font-semibold block mb-1">Hosted build missing API URL</span>
+                    This Pages build was compiled without{' '}
+                    <code className="text-hud-primary">VITE_MAHORAGA_API_BASE</code>, so the UI calls{' '}
+                    <code className="text-hud-primary">/api</code> on this hostname (which is not your Worker). In Cloudflare
+                    Pages → Settings → Environment variables, set{' '}
+                    <code className="text-hud-primary">VITE_MAHORAGA_API_BASE</code> to{' '}
+                    <code className="text-hud-primary break-all">https://&lt;your-worker&gt;.workers.dev/agent</code> for{' '}
+                    <strong>Preview</strong> and <strong>Production</strong>, then redeploy.
+                  </p>
+                ) : null}
+                <p>
+                  <span className="block text-[10px] text-hud-text-dim mb-1">API base for this build</span>
+                  <code className="text-hud-primary break-all text-[11px] block">
+                    {API_BASE.startsWith('http')
+                      ? API_BASE
+                      : typeof window !== 'undefined' &&
+                          (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                        ? `${API_BASE} (Vite) → http://localhost:${import.meta.env.VITE_WRANGLER_PORT || '8787'}/agent`
+                        : `${API_BASE} — no dev proxy on this host; set VITE_MAHORAGA_API_BASE to your Worker /agent URL`}
+                  </code>
+                </p>
+                <p>
+                  <span className="block mb-1">Enable the agent (run in a terminal; Worker must be running):</span>
+                  <code className="text-hud-primary break-all text-[10px] block">
+                    curl -H &quot;Authorization: Bearer $TOKEN&quot; {getAgentEnableUrlForHint()}
+                  </code>
+                </p>
+              </div>
             )}
           </div>
         </Panel>
@@ -627,61 +765,84 @@ export default function App() {
 
           {/* Row 3: Signals, Activity, Research */}
           <div className="col-span-4 md:col-span-4 lg:col-span-4">
-            <Panel title="ACTIVE SIGNALS" titleRight={signals.length.toString()} className="h-80">
+            <Panel
+              title="ACTIVE SIGNALS"
+              titleRight={`${actionableSignalCount}/${signals.length} actionable`}
+              className="h-80"
+            >
               <div className="overflow-y-auto h-full space-y-1">
                 {signals.length === 0 ? (
                   <div className="text-hud-text-dim text-sm py-4 text-center">Gathering signals...</div>
                 ) : (
-                  signals.slice(0, 20).map((sig: Signal, i: number) => (
-                    <Tooltip
-                      key={`${sig.symbol}-${sig.source}-${i}`}
-                      position="right"
-                      content={
-                        <TooltipContent
-                          title={`${sig.symbol} - ${sig.source.toUpperCase()}`}
-                          items={[
-                            { label: 'Sentiment', value: `${(sig.sentiment * 100).toFixed(0)}%`, color: getSentimentColor(sig.sentiment) },
-                            { label: 'Volume', value: sig.volume },
-                            ...(sig.bullish !== undefined ? [{ label: 'Bullish', value: sig.bullish, color: 'text-hud-success' }] : []),
-                            ...(sig.bearish !== undefined ? [{ label: 'Bearish', value: sig.bearish, color: 'text-hud-error' }] : []),
-                            ...(sig.score !== undefined ? [{ label: 'Score', value: sig.score }] : []),
-                            ...(sig.upvotes !== undefined ? [{ label: 'Upvotes', value: sig.upvotes }] : []),
-                            ...(sig.momentum !== undefined ? [{ label: 'Momentum', value: `${sig.momentum >= 0 ? '+' : ''}${sig.momentum.toFixed(2)}%` }] : []),
-                            ...(sig.price !== undefined ? [{ label: 'Price', value: formatCurrency(sig.price) }] : []),
-                          ]}
-                          description={sig.reason}
-                        />
-                      }
-                    >
-                      <motion.div 
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.02 }}
-                        className={clsx(
-                          "flex items-center justify-between py-1 px-2 border-b border-hud-line/10 hover:bg-hud-line/10 cursor-help",
-                          sig.isCrypto && "bg-hud-warning/5"
-                        )}
+                  signals.slice(0, 20).map((sig: Signal, i: number) => {
+                    const actionability = signalActionability[sig.symbol]
+                    const actionabilityView = getActionabilityView(sig.symbol, actionableSymbols, signalActionability)
+                    const isActionable = actionabilityView.isActionable
+                    const actionabilityLabel = actionabilityView.reasonLabel
+
+                    return (
+                      <Tooltip
+                        key={`${sig.symbol}-${sig.source}-${i}`}
+                        position="right"
+                        content={
+                          <TooltipContent
+                            title={`${sig.symbol} - ${sig.source.toUpperCase()}`}
+                            items={[
+                              {
+                                label: 'Actionable',
+                                value: isActionable ? 'YES' : `NO (${actionabilityLabel})`,
+                                color: isActionable ? 'text-hud-success' : 'text-hud-warning',
+                              },
+                              { label: 'Sentiment', value: `${(sig.sentiment * 100).toFixed(0)}%`, color: getSentimentColor(sig.sentiment) },
+                              { label: 'Volume', value: sig.volume },
+                              ...(sig.bullish !== undefined ? [{ label: 'Bullish', value: sig.bullish, color: 'text-hud-success' }] : []),
+                              ...(sig.bearish !== undefined ? [{ label: 'Bearish', value: sig.bearish, color: 'text-hud-error' }] : []),
+                              ...(sig.score !== undefined ? [{ label: 'Score', value: sig.score }] : []),
+                              ...(sig.upvotes !== undefined ? [{ label: 'Upvotes', value: sig.upvotes }] : []),
+                              ...(sig.momentum !== undefined ? [{ label: 'Momentum', value: `${sig.momentum >= 0 ? '+' : ''}${sig.momentum.toFixed(2)}%` }] : []),
+                              ...(sig.price !== undefined ? [{ label: 'Price', value: formatCurrency(sig.price) }] : []),
+                              ...(actionability?.price ? [{ label: 'Tradable Price', value: formatCurrency(actionability.price) }] : []),
+                            ]}
+                            description={sig.reason}
+                          />
+                        }
                       >
-                        <div className="flex items-center gap-2">
-                          {sig.isCrypto && <span className="text-hud-warning text-xs">₿</span>}
-                          <span className="hud-value-sm">{sig.symbol}</span>
-                          <span className={clsx('hud-label', sig.isCrypto ? 'text-hud-warning' : '')}>{sig.source.toUpperCase()}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          {sig.isCrypto && sig.momentum !== undefined ? (
-                            <span className={clsx('hud-label hidden sm:inline', sig.momentum >= 0 ? 'text-hud-success' : 'text-hud-error')}>
-                              {sig.momentum >= 0 ? '+' : ''}{sig.momentum.toFixed(1)}%
-                            </span>
-                          ) : (
-                            <span className="hud-label hidden sm:inline">VOL {sig.volume}</span>
+                        <motion.div 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.02 }}
+                          className={clsx(
+                            "flex items-center justify-between py-1 px-2 border-b border-hud-line/10 hover:bg-hud-line/10 cursor-help",
+                            sig.isCrypto && "bg-hud-warning/5",
+                            !isActionable && "opacity-65"
                           )}
-                          <span className={clsx('hud-value-sm', getSentimentColor(sig.sentiment))}>
-                            {(sig.sentiment * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </motion.div>
-                    </Tooltip>
-                  ))
+                        >
+                          <div className="flex items-center gap-2">
+                            {sig.isCrypto && <span className="text-hud-warning text-xs">₿</span>}
+                            <span className="hud-value-sm">{sig.symbol}</span>
+                            <span className={clsx('hud-label', sig.isCrypto ? 'text-hud-warning' : '')}>{sig.source.toUpperCase()}</span>
+                            {!isActionable && (
+                              <span className="hud-label text-hud-warning hidden sm:inline">
+                                NON-ACTIONABLE
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {sig.isCrypto && sig.momentum !== undefined ? (
+                              <span className={clsx('hud-label hidden sm:inline', sig.momentum >= 0 ? 'text-hud-success' : 'text-hud-error')}>
+                                {sig.momentum >= 0 ? '+' : ''}{sig.momentum.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="hud-label hidden sm:inline">VOL {sig.volume}</span>
+                            )}
+                            <span className={clsx('hud-value-sm', getSentimentColor(sig.sentiment))}>
+                              {(sig.sentiment * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        </motion.div>
+                      </Tooltip>
+                    )
+                  })
                 )}
               </div>
             </Panel>
@@ -809,6 +970,96 @@ export default function App() {
               </div>
             </Panel>
           </div>
+        </div>
+
+        <div className="mt-4">
+          <Panel
+            title="EXPERIMENT TRACKING"
+            titleRight={experimentForView ? `${experimentForView.status.toUpperCase()} • ${experimentForView.name}` : 'NO RUNS'}
+            className="min-h-[220px]"
+          >
+            {!experimentRunDetail || !latestSnapshot ? (
+              <div className="text-hud-text-dim text-sm py-4 text-center">
+                Start an experiment with `POST /agent/experiments/start` to begin baseline vs current tracking.
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                <div className="flex flex-wrap items-center gap-4">
+                  <span className="hud-label">RUN</span>
+                  <span className="hud-value-sm">{experimentRunDetail.name}</span>
+                  <span className="hud-label text-hud-text-dim">
+                    {new Date(experimentRunDetail.started_at).toLocaleString('en-US', { hour12: false })}
+                  </span>
+                  {experimentRunDetail.ended_at && (
+                    <span className="hud-label text-hud-text-dim">
+                      END {new Date(experimentRunDetail.ended_at).toLocaleString('en-US', { hour12: false })}
+                    </span>
+                  )}
+                  <span className={clsx('hud-label', latestSnapshot.verdict.passed ? 'text-hud-success' : 'text-hud-error')}>
+                    {latestSnapshot.verdict.passed ? 'PASS' : 'FAIL'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="p-2 border border-hud-line/30 rounded">
+                    <div className="hud-label text-hud-text-dim">Return %</div>
+                    <div className={clsx('hud-value-sm', latestSnapshot.metrics.returns.return_pct >= 0 ? 'text-hud-success' : 'text-hud-error')}>
+                      {formatPercent(latestSnapshot.metrics.returns.return_pct)}
+                    </div>
+                    {baselineSnapshot && (
+                      <div className="hud-label text-hud-text-dim">
+                        vs {formatPercent(baselineSnapshot.metrics.returns.return_pct)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 border border-hud-line/30 rounded">
+                    <div className="hud-label text-hud-text-dim">Actionable Ratio</div>
+                    <div className="hud-value-sm text-hud-primary">
+                      {(latestSnapshot.metrics.signal_funnel.avg_actionable_ratio * 100).toFixed(1)}%
+                    </div>
+                    {baselineSnapshot && (
+                      <div className="hud-label text-hud-text-dim">
+                        vs {(baselineSnapshot.metrics.signal_funnel.avg_actionable_ratio * 100).toFixed(1)}%
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 border border-hud-line/30 rounded">
+                    <div className="hud-label text-hud-text-dim">Alarm Errors</div>
+                    <div className={clsx('hud-value-sm', latestSnapshot.metrics.reliability.alarm_error_count === 0 ? 'text-hud-success' : 'text-hud-warning')}>
+                      {latestSnapshot.metrics.reliability.alarm_error_count}
+                    </div>
+                    {baselineSnapshot && (
+                      <div className="hud-label text-hud-text-dim">
+                        vs {baselineSnapshot.metrics.reliability.alarm_error_count}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 border border-hud-line/30 rounded">
+                    <div className="hud-label text-hud-text-dim">Cost / Trade</div>
+                    <div className="hud-value-sm text-hud-warning">
+                      {formatCurrency(latestSnapshot.metrics.costs.cost_per_executed_trade || 0)}
+                    </div>
+                    {baselineSnapshot && (
+                      <div className="hud-label text-hud-text-dim">
+                        vs {formatCurrency(baselineSnapshot.metrics.costs.cost_per_executed_trade || 0)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  {latestSnapshot.verdict.checks.map((check) => (
+                    <div key={check.name} className="flex items-center justify-between border-b border-hud-line/10 py-1">
+                      <span className="hud-label">{check.name}</span>
+                      <span className={clsx('hud-label', check.passed ? 'text-hud-success' : 'text-hud-error')}>
+                        {check.passed ? 'PASS' : 'FAIL'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Panel>
         </div>
 
         <footer className="mt-4 pt-3 border-t border-hud-line flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">

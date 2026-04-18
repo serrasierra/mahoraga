@@ -40,6 +40,12 @@
 	// Optional:
 	// - ALPACA_PAPER ("true" for paper trading)
 	// - TWITTER_BEARER_TOKEN
+	// - POLYGON_API_KEY (enables optional polygon_news gatherer)
+	// - UNUSUAL_WHALES_API_KEY (enables optional options_flow gatherer)
+	// - FMP_API_KEY (enables optional congressional gatherer)
+	// - GOVCON_API_KEY (enables optional contract_awards gatherer)
+	// - FINNHUB_API_KEY (optional free-tier finnhub_bundle gatherer)
+	// - FRED_API_KEY (optional free-tier fred_macro gatherer; crypto F&G needs no key)
 	// - DISCORD_WEBHOOK_URL
 	"d1_databases": [
 		{
@@ -52,7 +58,10 @@
 	"kv_namespaces": [
 		{
 			"binding": "CACHE",
-			"id": "<YOUR_KV_NAMESPACE_ID>"
+			"id": "<YOUR_KV_NAMESPACE_ID>",
+			// Dev/local: create with `wrangler kv namespace create CACHE --preview` and paste here.
+			// For wrangler dev without touching Cloudflare, use a second placeholder UUID distinct from `id`.
+			"preview_id": "<YOUR_KV_PREVIEW_NAMESPACE_ID>"
 		}
 	],
 	"r2_buckets": [

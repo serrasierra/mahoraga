@@ -70,6 +70,22 @@ export interface SocialSnapshotCacheEntry {
   sources: string[];
 }
 
+export interface SignalActionability {
+  is_actionable: boolean;
+  reason:
+    | "ok"
+    | "no_price"
+    | "asset_not_found"
+    | "asset_not_tradable"
+    | "exchange_not_allowed"
+    | "crypto_symbol_not_configured"
+    | "lookup_failed";
+  price: number | null;
+  normalized_symbol?: string;
+  asset_class?: "us_equity" | "crypto";
+  checked_at: number;
+}
+
 // ---------------------------------------------------------------------------
 // Logging & cost tracking
 // ---------------------------------------------------------------------------
@@ -86,6 +102,89 @@ export interface CostTracker {
   calls: number;
   tokens_in: number;
   tokens_out: number;
+}
+
+export interface ExperimentThresholdCheck {
+  name: string;
+  passed: boolean;
+  value: number;
+  baseline_value?: number;
+  note?: string;
+}
+
+export interface ExperimentVerdict {
+  passed: boolean;
+  checks: ExperimentThresholdCheck[];
+}
+
+export interface ExperimentReliabilityMetrics {
+  alarm_error_count: number;
+  source_error_count: number;
+  subrequest_error_count: number;
+}
+
+export interface ExperimentSignalFunnelMetrics {
+  avg_total_signals: number;
+  avg_actionable_signals: number;
+  avg_actionable_ratio: number;
+}
+
+export interface ExperimentDecisionMetrics {
+  researched_signals: number;
+  buy_executed: number;
+  sell_executed: number;
+  verdict_buy: number;
+  verdict_wait: number;
+  verdict_skip: number;
+}
+
+export interface ExperimentCostMetrics {
+  total_usd_delta: number;
+  calls_delta: number;
+  tokens_in_delta: number;
+  tokens_out_delta: number;
+  cost_per_researched_signal: number;
+  cost_per_executed_trade: number;
+}
+
+export interface ExperimentReturnMetrics {
+  equity_start: number;
+  equity_end: number;
+  equity_change: number;
+  return_pct: number;
+  max_drawdown_pct: number;
+}
+
+export interface ExperimentMetricsSnapshotData {
+  reliability: ExperimentReliabilityMetrics;
+  signal_funnel: ExperimentSignalFunnelMetrics;
+  decisions: ExperimentDecisionMetrics;
+  costs: ExperimentCostMetrics;
+  returns: ExperimentReturnMetrics;
+}
+
+export interface ExperimentMetricsSnapshot {
+  id: string;
+  experiment_id: string;
+  label: string;
+  captured_at: number;
+  window_start: number;
+  window_end: number;
+  metrics: ExperimentMetricsSnapshotData;
+  verdict: ExperimentVerdict;
+}
+
+export interface ExperimentRun {
+  id: string;
+  name: string;
+  hypothesis?: string;
+  change_notes?: string;
+  started_at: number;
+  ended_at: number | null;
+  status: "active" | "completed";
+  baseline_cost_tracker: CostTracker;
+  baseline_snapshot_id: string | null;
+  snapshots: ExperimentMetricsSnapshot[];
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +236,8 @@ export interface PremarketPlan {
 export interface AgentState {
   config: import("../schemas/agent-config").AgentConfig;
   signalCache: Signal[];
+  actionableSignalCache: Signal[];
+  signalActionability: Record<string, SignalActionability>;
   positionEntries: Record<string, PositionEntry>;
   socialHistory: Record<string, SocialHistoryEntry[]>;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;
@@ -151,6 +252,9 @@ export interface AgentState {
   positionResearch: Record<string, unknown>;
   stalenessAnalysis: Record<string, unknown>;
   twitterConfirmations: Record<string, TwitterConfirmation>;
+  experimentRuns: Record<string, ExperimentRun>;
+  experimentOrder: string[];
+  activeExperimentId: string | null;
   twitterDailyReads: number;
   twitterDailyReadReset: number;
   lastKnownNextOpenMs: number | null;

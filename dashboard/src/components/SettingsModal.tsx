@@ -25,6 +25,12 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
     window.location.reload()
   }
 
+  const handleTokenClear = () => {
+    localStorage.removeItem('mahoraga_api_token')
+    setApiToken('')
+    window.location.reload()
+  }
+
   const handleChange = <K extends keyof Config>(key: K, value: Config[K]) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }))
   }
@@ -65,9 +71,15 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
               <button className="hud-button" onClick={handleTokenSave}>
                 Save & Reload
               </button>
+              <button className="hud-button" onClick={handleTokenClear}>
+                Clear Token
+              </button>
             </div>
+            <p className="text-[10px] text-hud-text-dim mt-1">
+              This token is stored only in this browser's localStorage and is never embedded in the deployed frontend build.
+            </p>
             <p className="text-[9px] text-hud-text-dim mt-1">
-              Your MAHORAGA_API_TOKEN from Cloudflare secrets. Required for all API access.
+              Use your MAHORAGA_API_TOKEN from Cloudflare secrets. Required for all API access.
             </p>
           </div>
 
@@ -541,6 +553,239 @@ export function SettingsModal({ config, onSave, onClose }: SettingsModalProps) {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Institutional Data Sources */}
+          <div>
+            <h3 className="hud-label mb-3 text-hud-primary">Institutional Signal Sources</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.uoa_enabled || false}
+                    onChange={e => handleChange('uoa_enabled', e.target.checked)}
+                  />
+                  <span className="hud-label">Enable Unusual Options Flow</span>
+                </label>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">UOA Max Candidates</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.uoa_max_candidates || 10}
+                  onChange={e => handleChange('uoa_max_candidates', Number(e.target.value))}
+                  disabled={!localConfig.uoa_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">UOA Min Premium ($)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.uoa_min_premium || 100000}
+                  onChange={e => handleChange('uoa_min_premium', Number(e.target.value))}
+                  disabled={!localConfig.uoa_enabled}
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.congressional_enabled || false}
+                    onChange={e => handleChange('congressional_enabled', e.target.checked)}
+                  />
+                  <span className="hud-label">Enable Congressional Trades (FMP)</span>
+                </label>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Congressional Max Candidates</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.congressional_max_candidates || 10}
+                  onChange={e => handleChange('congressional_max_candidates', Number(e.target.value))}
+                  disabled={!localConfig.congressional_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Congressional Lookback (days)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.congressional_lookback_days || 14}
+                  onChange={e => handleChange('congressional_lookback_days', Number(e.target.value))}
+                  disabled={!localConfig.congressional_enabled}
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.contract_awards_enabled || false}
+                    onChange={e => handleChange('contract_awards_enabled', e.target.checked)}
+                  />
+                  <span className="hud-label">Enable Federal Contract Awards (GovCon)</span>
+                </label>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Contract Max Candidates</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.contract_awards_max_candidates || 10}
+                  onChange={e => handleChange('contract_awards_max_candidates', Number(e.target.value))}
+                  disabled={!localConfig.contract_awards_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Contract Lookback (days)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.contract_awards_lookback_days || 30}
+                  onChange={e => handleChange('contract_awards_lookback_days', Number(e.target.value))}
+                  disabled={!localConfig.contract_awards_enabled}
+                />
+              </div>
+            </div>
+            <p className="text-[9px] text-hud-text-dim mt-2">
+              Keep disabled until corresponding API keys are configured in worker secrets.
+            </p>
+          </div>
+
+          {/* Free-tier signal bundle */}
+          <div>
+            <h3 className="hud-label mb-3 text-hud-primary">Free-Tier Signal Bundle</h3>
+            <p className="text-[9px] text-hud-text-dim mb-3">
+              Staged activation: enable Crypto F&amp;G first, then Finnhub, then FRED. Use experiment snapshots between
+              stages. Set conservative TTLs to protect Worker subrequests and provider quotas.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.crypto_fng_enabled || false}
+                    onChange={e => handleChange('crypto_fng_enabled', e.target.checked)}
+                  />
+                  <span className="hud-label">Crypto Fear &amp; Greed (Alternative.me, no API key)</span>
+                </label>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">F&amp;G cache TTL (seconds)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.crypto_fng_cache_ttl_seconds ?? 1200}
+                  onChange={e => handleChange('crypto_fng_cache_ttl_seconds', Number(e.target.value))}
+                  disabled={!localConfig.crypto_fng_enabled}
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.finnhub_enabled || false}
+                    onChange={e => handleChange('finnhub_enabled', e.target.checked)}
+                  />
+                  <span className="hud-label">Finnhub market news bundle (requires FINNHUB_API_KEY)</span>
+                </label>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Finnhub max symbols</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.finnhub_max_symbols ?? 10}
+                  onChange={e => handleChange('finnhub_max_symbols', Number(e.target.value))}
+                  disabled={!localConfig.finnhub_enabled}
+                />
+              </div>
+              <div>
+                <label className="hud-label block mb-1">Finnhub cache TTL (seconds)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.finnhub_cache_ttl_seconds ?? 240}
+                  onChange={e => handleChange('finnhub_cache_ttl_seconds', Number(e.target.value))}
+                  disabled={!localConfig.finnhub_enabled}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="hud-label block mb-1">Finnhub symbol allowlist (comma-separated)</label>
+                <input
+                  type="text"
+                  className="hud-input w-full font-mono text-xs"
+                  value={(localConfig.finnhub_symbols || []).join(', ')}
+                  onChange={e =>
+                    handleChange(
+                      'finnhub_symbols',
+                      e.target.value
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  disabled={!localConfig.finnhub_enabled}
+                  placeholder="SPY, QQQ, AAPL, ..."
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="hud-input w-4 h-4"
+                    checked={localConfig.fred_enabled || false}
+                    onChange={e => handleChange('fred_enabled', e.target.checked)}
+                  />
+                  <span className="hud-label">FRED macro regime (SPY/QQQ bias, requires FRED_API_KEY)</span>
+                </label>
+              </div>
+              <div>
+                <label className="hud-label block mb-1">FRED cache TTL (seconds)</label>
+                <input
+                  type="number"
+                  className="hud-input w-full"
+                  value={localConfig.fred_cache_ttl_seconds ?? 14400}
+                  onChange={e => handleChange('fred_cache_ttl_seconds', Number(e.target.value))}
+                  disabled={!localConfig.fred_enabled}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="hud-label block mb-1">FRED series IDs (comma-separated)</label>
+                <input
+                  type="text"
+                  className="hud-input w-full font-mono text-xs"
+                  value={(localConfig.fred_series || []).join(', ')}
+                  onChange={e =>
+                    handleChange(
+                      'fred_series',
+                      e.target.value
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  disabled={!localConfig.fred_enabled}
+                  placeholder="VIXCLS, DGS10, FEDFUNDS"
+                />
+              </div>
+            </div>
+            <p className="text-[9px] text-hud-text-dim mt-2">
+              On 429 / upstream errors, gatherers fall back to KV cache when available or emit no signals (no
+              cycle-breaking throws).
+            </p>
           </div>
 
           {/* Stale Position Management */}

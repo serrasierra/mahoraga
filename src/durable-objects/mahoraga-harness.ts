@@ -10,12 +10,16 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { computeExperimentMetrics, evaluateExperimentThresholds } from "../core/experiment-metrics";
 import { createPolicyBroker } from "../core/policy-broker";
 import type {
   AgentState,
+  ExperimentMetricsSnapshot,
+  ExperimentRun,
   LogEntry,
   ResearchResult,
   Signal,
+  SignalActionability,
   SocialHistoryEntry,
   SocialSnapshotCacheEntry,
 } from "../core/types";
@@ -39,6 +43,8 @@ import { tickerCache } from "../strategy/default/helpers/ticker";
 import { runCryptoTrading } from "../strategy/default/rules/crypto-trading";
 import { findBestOptionsContract } from "../strategy/default/rules/options";
 import type { StrategyContext } from "../strategy/types";
+import { determineSignalActionability } from "./actionability";
+import { getActionabilityKey, selectUniqueActionabilityCandidates } from "./actionability-keys";
 
 // ============================================================================
 // DURABLE OBJECT CLASS
@@ -50,6 +56,9 @@ export class MahoragaHarness extends DurableObject<Env> {
   private _etDayFormatter: Intl.DateTimeFormat | null = null;
   private discordCooldowns: Map<string, number> = new Map();
   private readonly DISCORD_COOLDOWN_MS = 30 * 60 * 1000;
+  private readonly ACTIONABILITY_TTL_MS = 120_000;
+  private readonly ACTIONABILITY_EVAL_CAP_PER_CYCLE = 60;
+  private readonly ACTIONABILITY_INPUT_CAP = 120;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -171,7 +180,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           (self.state as unknown as Record<string, unknown>)[key] = value;
         },
       },
-      signals: this.state.signalCache,
+      signals: this.getActionableSignals(),
       positionEntries: this.state.positionEntries,
     };
   }
@@ -378,9 +387,91 @@ export class MahoragaHarness extends DurableObject<Env> {
       .slice(0, MAX_SIGNALS);
 
     this.state.signalCache = freshSignals;
+    const actionabilityInputSignals = freshSignals.slice(0, this.ACTIONABILITY_INPUT_CAP);
+    await this.refreshActionableSignals(actionabilityInputSignals);
     this.state.lastDataGatherRun = now;
 
-    this.log("System", "data_gathered", { ...counts, total: this.state.signalCache.length });
+    this.log("System", "data_gathered", {
+      ...counts,
+      total: this.state.signalCache.length,
+      actionable_total: this.state.actionableSignalCache.length,
+      filtered_non_actionable: this.state.signalCache.length - this.state.actionableSignalCache.length,
+    });
+  }
+
+  private getActionabilityFor(symbol: string): SignalActionability | undefined {
+    const actionability = this.state.signalActionability[symbol];
+    if (!actionability) return undefined;
+    if (Date.now() - actionability.checked_at > this.ACTIONABILITY_TTL_MS) return undefined;
+    return actionability;
+  }
+
+  private async evaluateSignalActionability(
+    signal: Signal,
+    alpaca = createAlpacaProviders(this.env)
+  ): Promise<SignalActionability> {
+    const symbol = signal.symbol;
+    const cached = this.getActionabilityFor(symbol);
+    if (cached) return cached;
+
+    const allowedExchanges = this.state.config.allowed_exchanges ?? ["NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"];
+    return determineSignalActionability({
+      signal,
+      cryptoSymbols: this.state.config.crypto_symbols || [],
+      allowedExchanges,
+      nowMs: Date.now(),
+      getAsset: async (s) => alpaca.trading.getAsset(s).catch(() => null),
+      getEquitySnapshot: async (s) => alpaca.marketData.getSnapshot(s).catch(() => null),
+      getCryptoSnapshot: async (s) => alpaca.marketData.getCryptoSnapshot(s).catch(() => null),
+    });
+  }
+
+  private async refreshActionableSignals(signals: Signal[]): Promise<void> {
+    const nowMs = Date.now();
+    const cryptoSymbols = this.state.config.crypto_symbols || [];
+    const evaluationCandidates = selectUniqueActionabilityCandidates(
+      signals,
+      cryptoSymbols,
+      this.ACTIONABILITY_EVAL_CAP_PER_CYCLE
+    );
+    const existingByKey = new Map<string, SignalActionability>();
+    for (const [symbol, actionability] of Object.entries(this.state.signalActionability)) {
+      const key = getActionabilityKey(symbol, cryptoSymbols);
+      const existing = existingByKey.get(key);
+      if (!existing || actionability.checked_at > existing.checked_at) {
+        existingByKey.set(key, actionability);
+      }
+    }
+
+    const actionabilityByKey = new Map(existingByKey);
+    const alpaca = createAlpacaProviders(this.env);
+    for (const [key, signal] of evaluationCandidates) {
+      const cached = actionabilityByKey.get(key);
+      const isFresh = cached && nowMs - cached.checked_at <= this.ACTIONABILITY_TTL_MS;
+      if (isFresh) continue;
+      const actionability = await this.evaluateSignalActionability(signal, alpaca);
+      actionabilityByKey.set(key, actionability);
+    }
+
+    const nextActionability: Record<string, SignalActionability> = {};
+    for (const signal of signals) {
+      const key = getActionabilityKey(signal.symbol, cryptoSymbols);
+      const actionability = actionabilityByKey.get(key);
+      if (!actionability) continue;
+      nextActionability[signal.symbol] = actionability;
+    }
+    this.state.signalActionability = nextActionability;
+
+    this.state.actionableSignalCache = signals.filter((signal) => {
+      return this.state.signalActionability[signal.symbol]?.is_actionable === true;
+    });
+  }
+
+  private getActionableSignals(): Signal[] {
+    if (this.state.actionableSignalCache.length > 0) return this.state.actionableSignalCache;
+    return this.state.signalCache.filter((signal) => {
+      return this.state.signalActionability[signal.symbol]?.is_actionable === true;
+    });
   }
 
   private buildSocialSnapshot(
@@ -478,6 +569,100 @@ export class MahoragaHarness extends DurableObject<Env> {
     return out;
   }
 
+  private createExperimentId(): string {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  private getExperimentRun(experimentId: string): ExperimentRun | null {
+    return this.state.experimentRuns[experimentId] ?? null;
+  }
+
+  private getExperimentSummaries(limit = 20): Array<{
+    id: string;
+    name: string;
+    hypothesis?: string;
+    change_notes?: string;
+    started_at: number;
+    ended_at: number | null;
+    status: "active" | "completed";
+    snapshots: number;
+    latest_snapshot?: ExperimentMetricsSnapshot;
+  }> {
+    return this.state.experimentOrder
+      .slice(-limit)
+      .reverse()
+      .map((id) => {
+        const run = this.state.experimentRuns[id];
+        if (!run) return null;
+        return {
+          id: run.id,
+          name: run.name,
+          hypothesis: run.hypothesis,
+          change_notes: run.change_notes,
+          started_at: run.started_at,
+          ended_at: run.ended_at,
+          status: run.status,
+          snapshots: run.snapshots.length,
+          latest_snapshot: run.snapshots[run.snapshots.length - 1],
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item);
+  }
+
+  private async captureExperimentSnapshot(experimentId: string, label: string): Promise<ExperimentMetricsSnapshot> {
+    const run = this.getExperimentRun(experimentId);
+    if (!run) {
+      throw new Error(`Experiment ${experimentId} not found`);
+    }
+
+    const now = Date.now();
+    const alpaca = createAlpacaProviders(this.env);
+
+    let portfolio: Array<{ timestamp: number; equity: number }> = [];
+    try {
+      const history = await alpaca.trading.getPortfolioHistory({
+        period: "1D",
+        timeframe: "15Min",
+        intraday_reporting: "extended_hours",
+      });
+      portfolio = history.timestamp.map((ts, i) => ({
+        timestamp: ts * 1000,
+        equity: history.equity[i] || 0,
+      }));
+    } catch {
+      portfolio = [];
+    }
+
+    const baselineSnapshot =
+      run.baseline_snapshot_id && run.snapshots.find((s) => s.id === run.baseline_snapshot_id)
+        ? run.snapshots.find((s) => s.id === run.baseline_snapshot_id)!
+        : null;
+
+    const metrics = computeExperimentMetrics({
+      logs: this.state.logs,
+      windowStartMs: run.started_at,
+      windowEndMs: now,
+      baselineCostTracker: run.baseline_cost_tracker,
+      currentCostTracker: this.state.costTracker,
+      portfolio,
+    });
+    const verdict = evaluateExperimentThresholds(baselineSnapshot?.metrics || null, metrics);
+
+    const snapshot: ExperimentMetricsSnapshot = {
+      id: this.createExperimentId(),
+      experiment_id: run.id,
+      label,
+      captured_at: now,
+      window_start: run.started_at,
+      window_end: now,
+      metrics,
+      verdict,
+    };
+
+    run.snapshots.push(snapshot);
+    return snapshot;
+  }
+
   // ============================================================================
   // LLM RESEARCH — uses strategy prompt builders
   // ============================================================================
@@ -486,7 +671,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const positions = await ctx.broker.getPositions();
     const heldSymbols = new Set(positions.map((p) => p.symbol));
 
-    const allSignals = this.state.signalCache;
+    const allSignals = this.getActionableSignals();
     const notHeld = allSignals.filter((s) => !heldSymbols.has(s.symbol));
     const aboveThreshold = notHeld.filter((s) => s.raw_sentiment >= this.state.config.min_sentiment_score);
     const candidates = aboveThreshold.sort((a, b) => b.sentiment - a.sentiment).slice(0, limit);
@@ -512,11 +697,15 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
     }
 
+    const gapRaw = this.env.SIGNAL_RESEARCH_GAP_MS;
+    const gapMsParsed = gapRaw ? Number.parseInt(gapRaw, 10) : 500;
+    const gapMs = Number.isFinite(gapMsParsed) && gapMsParsed >= 0 ? gapMsParsed : 500;
+
     const results: ResearchResult[] = [];
     for (const [symbol, data] of aggregated) {
       const analysis = await this.callSignalResearch(ctx, symbol, data.sentiment, data.sources);
       if (analysis) results.push(analysis);
-      await this.sleep(500);
+      await this.sleep(gapMs);
     }
 
     return results;
@@ -752,13 +941,16 @@ export class MahoragaHarness extends DurableObject<Env> {
       if (result) heldSymbols.delete(exit.symbol);
     }
 
-    if (positions.length >= this.state.config.max_positions || this.state.signalCache.length === 0) return;
+    const actionableSignals = this.getActionableSignals();
+    if (positions.length >= this.state.config.max_positions || actionableSignals.length === 0) return;
+    const actionableSymbols = new Set(actionableSignals.map((s) => s.symbol));
 
     // Strategy entry decisions from cached research
-    const research = Object.values(this.state.signalResearch);
+    const research = Object.values(this.state.signalResearch).filter((r) => actionableSymbols.has(r.symbol));
     const entries = activeStrategy.selectEntries(ctx, research, positions, account);
 
     for (const entry of entries) {
+      if (!actionableSymbols.has(entry.symbol)) continue;
       if (heldSymbols.has(entry.symbol)) continue;
       if (positions.length >= this.state.config.max_positions) break;
 
@@ -766,7 +958,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
       // Twitter confirmation
       if (isTwitterEnabled(ctx)) {
-        const originalSignal = this.state.signalCache.find((s) => s.symbol === entry.symbol);
+        const originalSignal = actionableSignals.find((s) => s.symbol === entry.symbol);
         if (originalSignal) {
           const twitterConfirm = await gatherTwitterConfirmation(ctx, entry.symbol, originalSignal.sentiment);
           if (twitterConfirm) {
@@ -795,7 +987,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       const result = await ctx.broker.buy(entry.symbol, entry.notional, entry.reason);
       if (result) {
         heldSymbols.add(entry.symbol);
-        const originalSignal = this.state.signalCache.find((s) => s.symbol === entry.symbol);
+        const originalSignal = actionableSignals.find((s) => s.symbol === entry.symbol);
         const aggregatedSocial = socialSnapshot[entry.symbol];
         this.state.positionEntries[entry.symbol] = {
           symbol: entry.symbol,
@@ -814,7 +1006,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
 
     // LLM analyst for additional recommendations
-    const analysis = await this.callAnalystLLM(ctx, this.state.signalCache, positions, account);
+    const analysis = await this.callAnalystLLM(ctx, actionableSignals, positions, account);
     const entrySymbols = new Set(entries.map((e) => e.symbol));
 
     for (const rec of analysis.recommendations) {
@@ -848,6 +1040,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       }
 
       if (rec.action === "BUY") {
+        if (!actionableSymbols.has(rec.symbol)) continue;
         if (positions.length >= this.state.config.max_positions) continue;
         if (heldSymbols.has(rec.symbol)) continue;
         if (entrySymbols.has(rec.symbol)) continue;
@@ -861,7 +1054,7 @@ export class MahoragaHarness extends DurableObject<Env> {
 
         const result = await ctx.broker.buy(rec.symbol, notional, rec.reasoning);
         if (result) {
-          const originalSignal = this.state.signalCache.find((s) => s.symbol === rec.symbol);
+          const originalSignal = actionableSignals.find((s) => s.symbol === rec.symbol);
           const aggregatedSocial = socialSnapshot[rec.symbol];
           heldSymbols.add(rec.symbol);
           this.state.positionEntries[rec.symbol] = {
@@ -931,16 +1124,16 @@ export class MahoragaHarness extends DurableObject<Env> {
 
   private async runPreMarketAnalysis(ctx: StrategyContext): Promise<void> {
     const [account, positions] = await Promise.all([ctx.broker.getAccount(), ctx.broker.getPositions()]);
-
-    if (!account || this.state.signalCache.length === 0) return;
+    const actionableSignals = this.getActionableSignals();
+    if (!account || actionableSignals.length === 0) return;
 
     this.log("System", "premarket_analysis_starting", {
-      signals: this.state.signalCache.length,
+      signals: actionableSignals.length,
       researched: Object.keys(this.state.signalResearch).length,
     });
 
     const signalResearch = await this.researchTopSignals(ctx, 10);
-    const analysis = await this.callAnalystLLM(ctx, this.state.signalCache, positions, account);
+    const analysis = await this.callAnalystLLM(ctx, actionableSignals, positions, account);
 
     this.state.premarketPlan = {
       timestamp: Date.now(),
@@ -982,6 +1175,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const [account, positions] = await Promise.all([ctx.broker.getAccount(), ctx.broker.getPositions()]);
     if (!account) return;
 
+    const actionableSignals = this.getActionableSignals();
     const heldSymbols = new Set(positions.map((p) => p.symbol));
     const socialSnapshot = this.getSocialSnapshotCache();
 
@@ -999,6 +1193,11 @@ export class MahoragaHarness extends DurableObject<Env> {
     // Then buys
     for (const rec of this.state.premarketPlan.recommendations) {
       if (rec.action === "BUY" && rec.confidence >= this.state.config.min_analyst_confidence) {
+        const isActionable = this.state.signalActionability[rec.symbol]?.is_actionable === true;
+        if (!isActionable) {
+          this.log("System", "premarket_buy_skipped_non_actionable", { symbol: rec.symbol });
+          continue;
+        }
         if (heldSymbols.has(rec.symbol)) continue;
         if (positions.length >= this.state.config.max_positions) break;
 
@@ -1012,7 +1211,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         const result = await ctx.broker.buy(rec.symbol, notional, `Pre-market plan: ${rec.reasoning}`);
         if (result) {
           heldSymbols.add(rec.symbol);
-          const originalSignal = this.state.signalCache.find((s) => s.symbol === rec.symbol);
+          const originalSignal = actionableSignals.find((s) => s.symbol === rec.symbol);
           const aggregatedSocial = socialSnapshot[rec.symbol];
           this.state.positionEntries[rec.symbol] = {
             symbol: rec.symbol,
@@ -1089,7 +1288,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       "history",
       "setup/status",
     ];
-    if (protectedActions.includes(action)) {
+    if (protectedActions.includes(action) || action === "experiments" || action.startsWith("experiments/")) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
     }
 
@@ -1111,9 +1310,21 @@ export class MahoragaHarness extends DurableObject<Env> {
         case "costs":
           return this.jsonResponse({ costs: this.state.costTracker });
         case "signals":
-          return this.jsonResponse({ signals: this.state.signalCache });
+          return this.jsonResponse({
+            signals: this.state.signalCache,
+            actionableSignals: this.state.actionableSignalCache,
+            signalActionability: this.state.signalActionability,
+          });
         case "history":
           return this.handleGetHistory(url);
+        case "experiments":
+          if (request.method !== "GET") {
+            return new Response(JSON.stringify({ ok: false, error: "Method not allowed" }), {
+              status: 405,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return this.handleListExperiments();
         case "trigger":
           await this.alarm();
           return this.jsonResponse({ ok: true, message: "Alarm triggered" });
@@ -1126,6 +1337,17 @@ export class MahoragaHarness extends DurableObject<Env> {
           }
           return this.handleKillSwitch();
         default:
+          if (action.startsWith("experiments/")) {
+            const suffix = action.slice("experiments/".length);
+            if (suffix === "start" && request.method === "POST") return this.handleStartExperiment(request);
+            if (suffix === "stop" && request.method === "POST") return this.handleStopExperiment(request);
+            if (suffix === "snapshot" && request.method === "POST") return this.handleSnapshotExperiment(request);
+            if (request.method === "GET") return this.handleGetExperimentById(suffix);
+            return new Response(JSON.stringify({ ok: false, error: "Method not allowed" }), {
+              status: 405,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           return new Response("Not found", { status: 404 });
       }
     } catch (error) {
@@ -1171,8 +1393,12 @@ export class MahoragaHarness extends DurableObject<Env> {
         clock,
         config: this.state.config,
         signals: this.state.signalCache,
+        actionableSignals: this.state.actionableSignalCache,
+        signalActionability: this.state.signalActionability,
         logs: this.state.logs.slice(-100),
         costs: this.state.costTracker,
+        activeExperimentId: this.state.activeExperimentId,
+        experimentSummaries: this.getExperimentSummaries(20),
         lastAnalystRun: this.state.lastAnalystRun,
         lastResearchRun: this.state.lastResearchRun,
         lastPositionResearchRun: this.state.lastPositionResearchRun,
@@ -1200,8 +1426,122 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     this.state.config = validation.data;
     this.initializeLLM();
+    await this.refreshActionableSignals(this.state.signalCache);
     await this.persist();
     return this.jsonResponse({ ok: true, config: this.state.config });
+  }
+
+  private async handleStartExperiment(request: Request): Promise<Response> {
+    if (this.state.activeExperimentId) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "An experiment is already active", id: this.state.activeExperimentId }),
+        { status: 409, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string;
+      hypothesis?: string;
+      change_notes?: string;
+    };
+    const id = this.createExperimentId();
+    const run: ExperimentRun = {
+      id,
+      name: body.name?.trim() || `Experiment ${new Date().toISOString()}`,
+      hypothesis: body.hypothesis?.trim() || undefined,
+      change_notes: body.change_notes?.trim() || undefined,
+      started_at: Date.now(),
+      ended_at: null,
+      status: "active",
+      baseline_cost_tracker: { ...this.state.costTracker },
+      baseline_snapshot_id: null,
+      snapshots: [],
+    };
+
+    this.state.experimentRuns[id] = run;
+    this.state.experimentOrder.push(id);
+    this.state.activeExperimentId = id;
+
+    const baselineSnapshot = await this.captureExperimentSnapshot(id, "baseline");
+    run.baseline_snapshot_id = baselineSnapshot.id;
+    await this.persist();
+    this.log("System", "experiment_started", { id, name: run.name });
+    return this.jsonResponse({ ok: true, data: run });
+  }
+
+  private async handleStopExperiment(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      id?: string;
+      capture_final_snapshot?: boolean;
+    };
+    const id = body.id || this.state.activeExperimentId;
+    if (!id) {
+      return new Response(JSON.stringify({ ok: false, error: "No active experiment to stop" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const run = this.getExperimentRun(id);
+    if (!run) {
+      return new Response(JSON.stringify({ ok: false, error: `Experiment ${id} not found` }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const shouldCaptureFinal = body.capture_final_snapshot !== false;
+    if (shouldCaptureFinal) {
+      await this.captureExperimentSnapshot(id, "final");
+    }
+
+    run.status = "completed";
+    run.ended_at = Date.now();
+    if (this.state.activeExperimentId === id) {
+      this.state.activeExperimentId = null;
+    }
+    await this.persist();
+    this.log("System", "experiment_stopped", { id, snapshots: run.snapshots.length });
+    return this.jsonResponse({ ok: true, data: run });
+  }
+
+  private async handleSnapshotExperiment(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      experiment_id?: string;
+      label?: string;
+    };
+    const experimentId = body.experiment_id || this.state.activeExperimentId;
+    if (!experimentId) {
+      return new Response(JSON.stringify({ ok: false, error: "No active experiment to snapshot" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const label = body.label?.trim() || "checkpoint";
+    const snapshot = await this.captureExperimentSnapshot(experimentId, label);
+    await this.persist();
+    this.log("System", "experiment_snapshot", { experiment_id: experimentId, label });
+    return this.jsonResponse({ ok: true, data: snapshot });
+  }
+
+  private handleListExperiments(): Response {
+    const data = {
+      activeExperimentId: this.state.activeExperimentId,
+      experiments: this.getExperimentSummaries(50),
+    };
+    return this.jsonResponse({ ok: true, data });
+  }
+
+  private handleGetExperimentById(experimentId: string): Response {
+    const run = this.getExperimentRun(experimentId);
+    if (!run) {
+      return new Response(JSON.stringify({ ok: false, error: `Experiment ${experimentId} not found` }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return this.jsonResponse({ ok: true, data: run });
   }
 
   private async handleEnable(): Promise<Response> {

@@ -22,8 +22,19 @@ export function selectEntries(
 ): BuyCandidate[] {
   const heldSymbols = new Set(positions.map((p) => p.symbol));
   const candidates: BuyCandidate[] = [];
+  const sourceStatsBySymbol = new Map<string, { sources: Set<string>; avgSentiment: number }>();
 
   if (positions.length >= ctx.config.max_positions) return [];
+
+  for (const signal of ctx.signals) {
+    const entry = sourceStatsBySymbol.get(signal.symbol) || {
+      sources: new Set<string>(),
+      avgSentiment: 0,
+    };
+    entry.sources.add(signal.source);
+    entry.avgSentiment = (entry.avgSentiment + signal.sentiment) / 2;
+    sourceStatsBySymbol.set(signal.symbol, entry);
+  }
 
   const buyResearch = research
     .filter((r) => r.verdict === "BUY" && r.confidence >= ctx.config.min_analyst_confidence)
@@ -33,19 +44,30 @@ export function selectEntries(
   for (const r of buyResearch.slice(0, 3)) {
     if (positions.length + candidates.length >= ctx.config.max_positions) break;
 
+    const signalStats = sourceStatsBySymbol.get(r.symbol);
+    const sourceCount = signalStats?.sources.size || 0;
+    const hasPolygonSource = signalStats?.sources.has("polygon_news") || false;
+    const avgSignalSentiment = signalStats?.avgSentiment || 0;
+
+    if (hasPolygonSource && sourceCount < 2 && r.confidence < Math.max(ctx.config.min_analyst_confidence + 0.1, 0.7)) {
+      continue;
+    }
+
+    const confidenceBoost = hasPolygonSource && sourceCount >= 2 && avgSignalSentiment > 0.3 ? 0.05 : 0;
+    const effectiveConfidence = Math.min(1, r.confidence + confidenceBoost);
     const sizePct = Math.min(20, ctx.config.position_size_pct_of_cash);
-    const notional = Math.min(account.cash * (sizePct / 100) * r.confidence, ctx.config.max_position_value);
+    const notional = Math.min(account.cash * (sizePct / 100) * effectiveConfidence, ctx.config.max_position_value);
 
     if (notional < 100) continue;
 
     const shouldUseOptions =
       ctx.config.options_enabled &&
-      r.confidence >= ctx.config.options_min_confidence &&
+      effectiveConfidence >= ctx.config.options_min_confidence &&
       r.entry_quality === "excellent";
 
     candidates.push({
       symbol: r.symbol,
-      confidence: r.confidence,
+      confidence: effectiveConfidence,
       reason: r.reasoning,
       notional,
       useOptions: shouldUseOptions,

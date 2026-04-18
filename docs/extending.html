@@ -238,6 +238,15 @@ export const newsGatherer: Gatherer = {
 };
       </pre>
 
+      <h3>Concrete Example: Polygon News Gatherer</h3>
+      <p>See <code>src/strategy/default/gatherers/polygon-news.ts</code> for a production example that:</p>
+      <ul>
+        <li>calls Polygon's news endpoint with <code>POLYGON_API_KEY</code></li>
+        <li>maps article tickers into <code>Signal[]</code></li>
+        <li>filters symbols to Alpaca-tradable + non-zero price before emitting</li>
+        <li>caps per-cycle output to control downstream LLM spend</li>
+      </ul>
+
       <h2>Example: Custom Exit Logic</h2>
       <p>Write a <code>selectExits</code> function that returns sell candidates:</p>
 

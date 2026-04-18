@@ -1,0 +1,39 @@
+Local MAHORAGA walkthrough (paper trading + LLM)
+================================================
+
+1) API keys (you paste these once)
+   - Alpaca PAPER: https://app.alpaca.markets/paper/dashboard/overview
+   - OpenAI (or edit LLM_PROVIDER / keys per .env.example): https://platform.openai.com/api-keys
+   - Copy .env.example to .dev.vars if needed, then edit .dev.vars
+
+2) Check keys
+   npm run local:check
+
+3) Database (one-time per clone, or after migrations change)
+   npm run local:db
+
+4) Terminal A — start the Worker
+   npm run dev
+   Wait until you see: Ready on http://localhost:8787
+
+5) Terminal B — talk to the agent (uses MAHORAGA_API_TOKEN from .dev.vars)
+   npm run local:status
+   npm run local:enable
+   npm run local:trigger
+   npm run local:logs
+
+6) Optional — dashboard UI (third terminal)
+   npm run local:dashboard
+   Then open the URL Vite prints (usually http://localhost:5173)
+
+Notes
+-----
+- If OpenAI returns 429 rate_limit_exceeded (low RPM), add to .dev.vars:
+  SIGNAL_RESEARCH_GAP_MS=20000
+  Then restart npm run dev. Or request a higher limit at platform.openai.com/account/limits
+- Raw social symbols may appear in UI even when not tradable; Mahoraga now filters
+  non-actionable symbols (no tradability/price) out of LLM research and trade decisions.
+- Cloudflare runtime note: high-signal cycles can hit subrequest caps; keep actionability dedupe/caps on, and use `wrangler.jsonc` `limits.subrequests` as a fallback guardrail.
+- .dev.vars is gitignored; never commit it.
+- If Alpaca or OpenAI returns errors, read npm run local:logs and the Terminal A output.
+- Upstream updates: git fetch upstream && git merge upstream/main (on main)
