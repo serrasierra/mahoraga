@@ -8,6 +8,19 @@ export { SessionDO } from "./durable-objects/session";
 export { MahoragaMcpAgent };
 export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
 
+function withCors(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Authorization,Content-Type");
+  headers.set("Access-Control-Max-Age", "86400");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 function constantTimeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let mismatch = 0;
@@ -36,8 +49,12 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/agent")) {
+      return withCors(new Response(null, { status: 204 }));
+    }
+
     if (url.pathname === "/health") {
-      return new Response(
+      return withCors(new Response(
         JSON.stringify({
           status: "ok",
           timestamp: new Date().toISOString(),
@@ -46,11 +63,11 @@ export default {
         {
           headers: { "Content-Type": "application/json" },
         }
-      );
+      ));
     }
 
     if (url.pathname === "/") {
-      return new Response(
+      return withCors(new Response(
         JSON.stringify({
           name: "mahoraga",
           version: "0.3.0",
@@ -64,29 +81,29 @@ export default {
         {
           headers: { "Content-Type": "application/json" },
         }
-      );
+      ));
     }
 
     if (url.pathname.startsWith("/mcp")) {
       if (!isAuthorized(request, env)) {
-        return unauthorizedResponse();
+        return withCors(unauthorizedResponse());
       }
-      return MahoragaMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
+      return withCors(await MahoragaMcpAgent.mount("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx));
     }
 
     if (url.pathname.startsWith("/agent")) {
       if (!isAuthorized(request, env)) {
-        return unauthorizedResponse();
+        return withCors(unauthorizedResponse());
       }
 
       // Rate limiting via SessionDO
       const tokenHash = request.headers.get("Authorization")?.slice(7, 15) || "anon";
       const rateCheck = await checkRateLimit(env, `agent-${tokenHash}`);
       if (!rateCheck.allowed) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
+        return withCors(new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
           status: 429,
           headers: { "Content-Type": "application/json" },
-        });
+        }));
       }
       await incrementRequest(env, `agent-${tokenHash}`);
 
@@ -94,16 +111,16 @@ export default {
       const agentPath = url.pathname.replace("/agent", "") || "/status";
       const agentUrl = new URL(agentPath, "http://harness");
       agentUrl.search = url.search;
-      return stub.fetch(
+      return withCors(await stub.fetch(
         new Request(agentUrl.toString(), {
           method: request.method,
           headers: request.headers,
           body: request.body,
         })
-      );
+      ));
     }
 
-    return new Response("Not found", { status: 404 });
+    return withCors(new Response("Not found", { status: 404 }));
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {

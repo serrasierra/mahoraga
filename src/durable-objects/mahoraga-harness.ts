@@ -13,6 +13,8 @@ import { DurableObject } from "cloudflare:workers";
 import { createPolicyBroker } from "../core/policy-broker";
 import type {
   AgentState,
+  ExperimentMetricsSnapshot,
+  ExperimentRun,
   LogEntry,
   ResearchResult,
   Signal,
@@ -20,6 +22,7 @@ import type {
   SocialHistoryEntry,
   SocialSnapshotCacheEntry,
 } from "../core/types";
+import { computeExperimentMetrics, evaluateExperimentThresholds } from "../core/experiment-metrics";
 import type { Env } from "../env.d";
 import { getDefaultPolicyConfig } from "../policy/config";
 import { createAlpacaProviders } from "../providers/alpaca";
@@ -564,6 +567,100 @@ export class MahoragaHarness extends DurableObject<Env> {
       out[symbol] = { volume: s.volume, sentiment: s.sentiment, sources: Array.from(s.sources) };
     }
     return out;
+  }
+
+  private createExperimentId(): string {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  private getExperimentRun(experimentId: string): ExperimentRun | null {
+    return this.state.experimentRuns[experimentId] ?? null;
+  }
+
+  private getExperimentSummaries(limit = 20): Array<{
+    id: string;
+    name: string;
+    hypothesis?: string;
+    change_notes?: string;
+    started_at: number;
+    ended_at: number | null;
+    status: "active" | "completed";
+    snapshots: number;
+    latest_snapshot?: ExperimentMetricsSnapshot;
+  }> {
+    return this.state.experimentOrder
+      .slice(-limit)
+      .reverse()
+      .map((id) => {
+        const run = this.state.experimentRuns[id];
+        if (!run) return null;
+        return {
+          id: run.id,
+          name: run.name,
+          hypothesis: run.hypothesis,
+          change_notes: run.change_notes,
+          started_at: run.started_at,
+          ended_at: run.ended_at,
+          status: run.status,
+          snapshots: run.snapshots.length,
+          latest_snapshot: run.snapshots[run.snapshots.length - 1],
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item);
+  }
+
+  private async captureExperimentSnapshot(experimentId: string, label: string): Promise<ExperimentMetricsSnapshot> {
+    const run = this.getExperimentRun(experimentId);
+    if (!run) {
+      throw new Error(`Experiment ${experimentId} not found`);
+    }
+
+    const now = Date.now();
+    const alpaca = createAlpacaProviders(this.env);
+
+    let portfolio: Array<{ timestamp: number; equity: number }> = [];
+    try {
+      const history = await alpaca.trading.getPortfolioHistory({
+        period: "1D",
+        timeframe: "15Min",
+        intraday_reporting: "extended_hours",
+      });
+      portfolio = history.timestamp.map((ts, i) => ({
+        timestamp: ts * 1000,
+        equity: history.equity[i] || 0,
+      }));
+    } catch {
+      portfolio = [];
+    }
+
+    const baselineSnapshot =
+      run.baseline_snapshot_id && run.snapshots.find((s) => s.id === run.baseline_snapshot_id)
+        ? run.snapshots.find((s) => s.id === run.baseline_snapshot_id)!
+        : null;
+
+    const metrics = computeExperimentMetrics({
+      logs: this.state.logs,
+      windowStartMs: run.started_at,
+      windowEndMs: now,
+      baselineCostTracker: run.baseline_cost_tracker,
+      currentCostTracker: this.state.costTracker,
+      portfolio,
+    });
+    const verdict = evaluateExperimentThresholds(baselineSnapshot?.metrics || null, metrics);
+
+    const snapshot: ExperimentMetricsSnapshot = {
+      id: this.createExperimentId(),
+      experiment_id: run.id,
+      label,
+      captured_at: now,
+      window_start: run.started_at,
+      window_end: now,
+      metrics,
+      verdict,
+    };
+
+    run.snapshots.push(snapshot);
+    return snapshot;
   }
 
   // ============================================================================
@@ -1191,7 +1288,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       "history",
       "setup/status",
     ];
-    if (protectedActions.includes(action)) {
+    if (protectedActions.includes(action) || action === "experiments" || action.startsWith("experiments/")) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
     }
 
@@ -1220,6 +1317,14 @@ export class MahoragaHarness extends DurableObject<Env> {
           });
         case "history":
           return this.handleGetHistory(url);
+        case "experiments":
+          if (request.method !== "GET") {
+            return new Response(JSON.stringify({ ok: false, error: "Method not allowed" }), {
+              status: 405,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return this.handleListExperiments();
         case "trigger":
           await this.alarm();
           return this.jsonResponse({ ok: true, message: "Alarm triggered" });
@@ -1232,6 +1337,17 @@ export class MahoragaHarness extends DurableObject<Env> {
           }
           return this.handleKillSwitch();
         default:
+          if (action.startsWith("experiments/")) {
+            const suffix = action.slice("experiments/".length);
+            if (suffix === "start" && request.method === "POST") return this.handleStartExperiment(request);
+            if (suffix === "stop" && request.method === "POST") return this.handleStopExperiment(request);
+            if (suffix === "snapshot" && request.method === "POST") return this.handleSnapshotExperiment(request);
+            if (request.method === "GET") return this.handleGetExperimentById(suffix);
+            return new Response(JSON.stringify({ ok: false, error: "Method not allowed" }), {
+              status: 405,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           return new Response("Not found", { status: 404 });
       }
     } catch (error) {
@@ -1281,6 +1397,8 @@ export class MahoragaHarness extends DurableObject<Env> {
         signalActionability: this.state.signalActionability,
         logs: this.state.logs.slice(-100),
         costs: this.state.costTracker,
+        activeExperimentId: this.state.activeExperimentId,
+        experimentSummaries: this.getExperimentSummaries(20),
         lastAnalystRun: this.state.lastAnalystRun,
         lastResearchRun: this.state.lastResearchRun,
         lastPositionResearchRun: this.state.lastPositionResearchRun,
@@ -1311,6 +1429,119 @@ export class MahoragaHarness extends DurableObject<Env> {
     await this.refreshActionableSignals(this.state.signalCache);
     await this.persist();
     return this.jsonResponse({ ok: true, config: this.state.config });
+  }
+
+  private async handleStartExperiment(request: Request): Promise<Response> {
+    if (this.state.activeExperimentId) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "An experiment is already active", id: this.state.activeExperimentId }),
+        { status: 409, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string;
+      hypothesis?: string;
+      change_notes?: string;
+    };
+    const id = this.createExperimentId();
+    const run: ExperimentRun = {
+      id,
+      name: body.name?.trim() || `Experiment ${new Date().toISOString()}`,
+      hypothesis: body.hypothesis?.trim() || undefined,
+      change_notes: body.change_notes?.trim() || undefined,
+      started_at: Date.now(),
+      ended_at: null,
+      status: "active",
+      baseline_cost_tracker: { ...this.state.costTracker },
+      baseline_snapshot_id: null,
+      snapshots: [],
+    };
+
+    this.state.experimentRuns[id] = run;
+    this.state.experimentOrder.push(id);
+    this.state.activeExperimentId = id;
+
+    const baselineSnapshot = await this.captureExperimentSnapshot(id, "baseline");
+    run.baseline_snapshot_id = baselineSnapshot.id;
+    await this.persist();
+    this.log("System", "experiment_started", { id, name: run.name });
+    return this.jsonResponse({ ok: true, data: run });
+  }
+
+  private async handleStopExperiment(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      id?: string;
+      capture_final_snapshot?: boolean;
+    };
+    const id = body.id || this.state.activeExperimentId;
+    if (!id) {
+      return new Response(JSON.stringify({ ok: false, error: "No active experiment to stop" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const run = this.getExperimentRun(id);
+    if (!run) {
+      return new Response(JSON.stringify({ ok: false, error: `Experiment ${id} not found` }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const shouldCaptureFinal = body.capture_final_snapshot !== false;
+    if (shouldCaptureFinal) {
+      await this.captureExperimentSnapshot(id, "final");
+    }
+
+    run.status = "completed";
+    run.ended_at = Date.now();
+    if (this.state.activeExperimentId === id) {
+      this.state.activeExperimentId = null;
+    }
+    await this.persist();
+    this.log("System", "experiment_stopped", { id, snapshots: run.snapshots.length });
+    return this.jsonResponse({ ok: true, data: run });
+  }
+
+  private async handleSnapshotExperiment(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      experiment_id?: string;
+      label?: string;
+    };
+    const experimentId = body.experiment_id || this.state.activeExperimentId;
+    if (!experimentId) {
+      return new Response(JSON.stringify({ ok: false, error: "No active experiment to snapshot" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const label = body.label?.trim() || "checkpoint";
+    const snapshot = await this.captureExperimentSnapshot(experimentId, label);
+    await this.persist();
+    this.log("System", "experiment_snapshot", { experiment_id: experimentId, label });
+    return this.jsonResponse({ ok: true, data: snapshot });
+  }
+
+  private handleListExperiments(): Response {
+    const data = {
+      activeExperimentId: this.state.activeExperimentId,
+      experiments: this.getExperimentSummaries(50),
+    };
+    return this.jsonResponse({ ok: true, data });
+  }
+
+  private handleGetExperimentById(experimentId: string): Response {
+    const run = this.getExperimentRun(experimentId);
+    if (!run) {
+      return new Response(JSON.stringify({ ok: false, error: `Experiment ${experimentId} not found` }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return this.jsonResponse({ ok: true, data: run });
   }
 
   private async handleEnable(): Promise<Response> {

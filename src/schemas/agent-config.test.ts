@@ -1,49 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CONFIG } from "../strategy/default/config";
 import { AgentConfigSchema, safeValidateAgentConfig, validateAgentConfig } from "./agent-config";
 
 function createValidConfig() {
-  return {
-    data_poll_interval_ms: 30000,
-    analyst_interval_ms: 120000,
-    premarket_plan_window_minutes: 5,
-    market_open_execute_window_minutes: 2,
-    max_position_value: 5000,
-    max_positions: 5,
-    min_sentiment_score: 0.3,
-    min_analyst_confidence: 0.6,
-    take_profit_pct: 10,
-    stop_loss_pct: 5,
-    position_size_pct_of_cash: 10,
-    stale_position_enabled: true,
-    stale_min_hold_hours: 4,
-    stale_max_hold_days: 7,
-    stale_min_gain_pct: 5,
-    stale_mid_hold_days: 3,
-    stale_mid_min_gain_pct: 2,
-    stale_social_volume_decay: 0.3,
-    llm_provider: "openai-raw" as const,
-    llm_model: "gpt-4o-mini",
-    llm_analyst_model: "gpt-4o",
-    llm_min_hold_minutes: 30,
-    options_enabled: false,
-    options_min_confidence: 0.8,
-    options_max_pct_per_trade: 0.02,
-    options_min_dte: 30,
-    options_max_dte: 60,
-    options_target_delta: 0.5,
-    options_min_delta: 0.3,
-    options_max_delta: 0.7,
-    options_stop_loss_pct: 50,
-    options_take_profit_pct: 100,
-    crypto_enabled: false,
-    crypto_symbols: ["BTC/USD", "ETH/USD"],
-    crypto_momentum_threshold: 2.0,
-    crypto_max_position_value: 2000,
-    crypto_take_profit_pct: 15,
-    crypto_stop_loss_pct: 10,
-    ticker_blacklist: [],
-    allowed_exchanges: ["NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"],
-  };
+  return { ...DEFAULT_CONFIG };
 }
 
 describe("AgentConfigSchema", () => {

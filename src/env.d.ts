@@ -21,6 +21,13 @@ export interface Env {
   LLM_MODEL?: string;
   TWITTER_BEARER_TOKEN?: string;
   POLYGON_API_KEY?: string;
+  UNUSUAL_WHALES_API_KEY?: string;
+  FMP_API_KEY?: string;
+  GOVCON_API_KEY?: string;
+  /** Free-tier: Finnhub REST (https://finnhub.io/docs/api) */
+  FINNHUB_API_KEY?: string;
+  /** Free-tier: FRED macro series (https://fred.stlouisfed.org/docs/api/fred/) */
+  FRED_API_KEY?: string;
   DISCORD_WEBHOOK_URL?: string;
   MAHORAGA_API_TOKEN: string;
   KILL_SWITCH_SECRET: string;

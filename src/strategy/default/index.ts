@@ -16,6 +16,12 @@
 import type { Strategy } from "../types";
 import { DEFAULT_CONFIG } from "./config";
 import { cryptoGatherer } from "./gatherers/crypto";
+import { optionsFlowGatherer } from "./gatherers/options-flow";
+import { congressionalTradesGatherer } from "./gatherers/congressional-trades";
+import { contractAwardsGatherer } from "./gatherers/contract-awards";
+import { cryptoFearGreedGatherer } from "./gatherers/crypto-fear-greed";
+import { finnhubBundleGatherer } from "./gatherers/finnhub-bundle";
+import { fredMacroGatherer } from "./gatherers/fred-macro";
 import { planMarkerGatherer } from "./gatherers/plan-marker";
 import { polygonNewsGatherer } from "./gatherers/polygon-news";
 import { redditGatherer } from "./gatherers/reddit";
@@ -32,7 +38,20 @@ export const defaultStrategy: Strategy = {
   configSchema: null,
   defaultConfig: DEFAULT_CONFIG,
 
-  gatherers: [planMarkerGatherer, stocktwitsGatherer, redditGatherer, polygonNewsGatherer, cryptoGatherer, secGatherer],
+  gatherers: [
+    planMarkerGatherer,
+    stocktwitsGatherer,
+    redditGatherer,
+    polygonNewsGatherer,
+    optionsFlowGatherer,
+    congressionalTradesGatherer,
+    contractAwardsGatherer,
+    finnhubBundleGatherer,
+    fredMacroGatherer,
+    cryptoFearGreedGatherer,
+    cryptoGatherer,
+    secGatherer,
+  ],
 
   prompts: {
     researchSignal: researchSignalPrompt,

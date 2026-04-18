@@ -305,6 +305,62 @@
         </tr>
       </table>
 
+      <h2>Free-tier signal bundle</h2>
+      <p>Optional sources that stay <strong>disabled by default</strong>. They use the <code>CACHE</code> KV namespace for soft TTLs and degrade gracefully on upstream errors or <strong>429</strong> (exponential backoff + jitter, then stale cache if present).</p>
+      <p><strong>Recommended activation order:</strong> (1) <code>crypto_fng_enabled</code> — no API key; (2) <code>finnhub_enabled</code> + <code>FINNHUB_API_KEY</code>; (3) <code>fred_enabled</code> + <code>FRED_API_KEY</code>. After each stage, capture an experiment snapshot and confirm alarm errors / actionable ratio / costs.</p>
+      <table>
+        <tr>
+          <th>Setting</th>
+          <th>Default</th>
+          <th>Description</th>
+        </tr>
+        <tr>
+          <td><code>crypto_fng_enabled</code></td>
+          <td>false</td>
+          <td>Alternative.me crypto Fear &amp; Greed → sentiment on <code>crypto_symbols</code></td>
+        </tr>
+        <tr>
+          <td><code>crypto_fng_cache_ttl_seconds</code></td>
+          <td>1200</td>
+          <td>KV TTL for F&amp;G JSON (~15–30 min recommended)</td>
+        </tr>
+        <tr>
+          <td><code>finnhub_enabled</code></td>
+          <td>false</td>
+          <td>Finnhub general news bundle (one cached GET per TTL)</td>
+        </tr>
+        <tr>
+          <td><code>finnhub_max_symbols</code></td>
+          <td>10</td>
+          <td>Cap unique tickers taken from headlines / <code>related</code></td>
+        </tr>
+        <tr>
+          <td><code>finnhub_cache_ttl_seconds</code></td>
+          <td>240</td>
+          <td>KV TTL (~180–300s recommended)</td>
+        </tr>
+        <tr>
+          <td><code>finnhub_symbols</code></td>
+          <td>SPY, QQQ, …</td>
+          <td>Allowlist of uppercase tickers to match against news</td>
+        </tr>
+        <tr>
+          <td><code>fred_enabled</code></td>
+          <td>false</td>
+          <td>FRED observations → conservative SPY/QQQ bias (low weight)</td>
+        </tr>
+        <tr>
+          <td><code>fred_series</code></td>
+          <td>VIXCLS, DGS10, FEDFUNDS</td>
+          <td>FRED series IDs (small set; each cached separately)</td>
+        </tr>
+        <tr>
+          <td><code>fred_cache_ttl_seconds</code></td>
+          <td>14400</td>
+          <td>KV TTL (1–6h+ recommended; macro moves slowly)</td>
+        </tr>
+      </table>
+
       <h2>Environment Variables</h2>
       <p>Set in <code>.dev.vars</code> (local) or via <code>wrangler secret put</code> (production):</p>
 
@@ -358,6 +414,31 @@
           <td><code>POLYGON_API_KEY</code></td>
           <td>No</td>
           <td>Enable <code>polygon_news</code> gatherer for tradable/priced news catalysts (gatherer self-disables if missing)</td>
+        </tr>
+        <tr>
+          <td><code>UNUSUAL_WHALES_API_KEY</code></td>
+          <td>No</td>
+          <td>Enable institutional options flow gatherer (<code>options_flow</code>)</td>
+        </tr>
+        <tr>
+          <td><code>FMP_API_KEY</code></td>
+          <td>No</td>
+          <td>Enable congressional transaction gatherer (<code>congressional</code>)</td>
+        </tr>
+        <tr>
+          <td><code>GOVCON_API_KEY</code></td>
+          <td>No</td>
+          <td>Enable federal contract award gatherer (<code>contract_awards</code>)</td>
+        </tr>
+        <tr>
+          <td><code>FINNHUB_API_KEY</code></td>
+          <td>No</td>
+          <td>Enable <code>finnhub_bundle</code> gatherer (general market news)</td>
+        </tr>
+        <tr>
+          <td><code>FRED_API_KEY</code></td>
+          <td>No</td>
+          <td>Enable <code>fred_macro</code> gatherer (macro regime bias on SPY/QQQ)</td>
         </tr>
       </table>
 
@@ -440,6 +521,26 @@
           <td>LLM usage and costs</td>
         </tr>
         <tr>
+          <td><code>GET /agent/experiments</code></td>
+          <td>List experiment runs and active experiment id</td>
+        </tr>
+        <tr>
+          <td><code>GET /agent/experiments/:id</code></td>
+          <td>Get one experiment run with baseline/current snapshots</td>
+        </tr>
+        <tr>
+          <td><code>POST /agent/experiments/start</code></td>
+          <td>Start run and capture baseline snapshot</td>
+        </tr>
+        <tr>
+          <td><code>POST /agent/experiments/snapshot</code></td>
+          <td>Capture a labeled checkpoint snapshot</td>
+        </tr>
+        <tr>
+          <td><code>POST /agent/experiments/stop</code></td>
+          <td>Stop run and capture final snapshot (default behavior)</td>
+        </tr>
+        <tr>
           <td><code>GET /agent/signals</code></td>
           <td>Current raw signal cache + actionable subset + actionability reasons</td>
         </tr>
@@ -454,6 +555,46 @@
       </table>
 
       <h2>Tuning Tips</h2>
+
+      <h2>Per-Change Experiment Workflow</h2>
+      <p>Use experiments to compare each strategy tweak against a baseline window using deterministic pass/fail checks.</p>
+      <ol>
+        <li>Start a run with notes about the change and hypothesis.</li>
+        <li>Run one defined observation window (same session/time-of-day when possible).</li>
+        <li>Capture optional checkpoints and then stop the run.</li>
+        <li>Compare baseline vs latest snapshot in dashboard or <code>GET /agent/experiments/:id</code>.</li>
+      </ol>
+
+      <pre><code>curl -X POST -H "Authorization: Bearer $MAHORAGA_TOKEN" \
+  -H "Content-Type: application/json" \
+  "$MAHORAGA_URL/agent/experiments/start" \
+  -d '{"name":"change-001","hypothesis":"improve signal quality","change_notes":"entry rule tweak"}'
+
+curl -X POST -H "Authorization: Bearer $MAHORAGA_TOKEN" \
+  -H "Content-Type: application/json" \
+  "$MAHORAGA_URL/agent/experiments/snapshot" \
+  -d '{"label":"mid-window"}'
+
+curl -X POST -H "Authorization: Bearer $MAHORAGA_TOKEN" \
+  -H "Content-Type: application/json" \
+  "$MAHORAGA_URL/agent/experiments/stop" \
+  -d '{}'</code></pre>
+
+      <p><strong>Snapshot interpretation:</strong></p>
+      <ul>
+        <li><code>returns.return_pct</code>: higher is better for the same window.</li>
+        <li><code>signal_funnel.avg_actionable_ratio</code>: tracks signal quality after filtering.</li>
+        <li><code>reliability.alarm_error_count</code>: should not increase versus baseline.</li>
+        <li><code>costs.cost_per_executed_trade</code>: should stay flat or improve (within tolerance).</li>
+      </ul>
+
+      <p><strong>Top 3 institutional source rollout:</strong></p>
+      <ol>
+        <li>Enable <code>uoa_enabled</code> only and run one full experiment window.</li>
+        <li>If metrics pass, enable <code>congressional_enabled</code> and repeat.</li>
+        <li>Enable <code>contract_awards_enabled</code> last, with conservative candidate caps.</li>
+      </ol>
+      <p>Recommended initial caps: <code>uoa_max_candidates=10</code>, <code>congressional_max_candidates=10</code>, <code>contract_awards_max_candidates=10</code>.</p>
 
       <p><strong>Agent not making trades?</strong></p>
       <ul>

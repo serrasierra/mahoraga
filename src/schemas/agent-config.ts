@@ -48,6 +48,30 @@ export const AgentConfigSchema = z
     crypto_take_profit_pct: z.number().min(1).max(100),
     crypto_stop_loss_pct: z.number().min(1).max(50),
 
+    uoa_enabled: z.boolean(),
+    uoa_max_candidates: z.number().int().min(1).max(50),
+    uoa_min_premium: z.number().min(1000).max(10_000_000),
+
+    congressional_enabled: z.boolean(),
+    congressional_max_candidates: z.number().int().min(1).max(50),
+    congressional_lookback_days: z.number().int().min(1).max(90),
+
+    contract_awards_enabled: z.boolean(),
+    contract_awards_max_candidates: z.number().int().min(1).max(50),
+    contract_awards_lookback_days: z.number().int().min(1).max(180),
+
+    finnhub_enabled: z.boolean(),
+    finnhub_max_symbols: z.number().int().min(1).max(30),
+    finnhub_cache_ttl_seconds: z.number().int().min(60).max(86400),
+    finnhub_symbols: z.array(z.string()),
+
+    fred_enabled: z.boolean(),
+    fred_series: z.array(z.string()),
+    fred_cache_ttl_seconds: z.number().int().min(300).max(604800),
+
+    crypto_fng_enabled: z.boolean(),
+    crypto_fng_cache_ttl_seconds: z.number().int().min(300).max(86400),
+
     ticker_blacklist: z.array(z.string()),
     allowed_exchanges: z.array(z.string()),
   })
