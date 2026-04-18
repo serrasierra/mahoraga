@@ -31,7 +31,10 @@ function parseRelatedTickers(related: string | undefined): string[] {
   if (!related || typeof related !== "string") return [];
   const out: string[] = [];
   for (const part of related.split(/[,\s]+/)) {
-    const s = part.replace(/^[\s$]+/, "").toUpperCase().trim();
+    const s = part
+      .replace(/^[\s$]+/, "")
+      .toUpperCase()
+      .trim();
     if (/^[A-Z]{1,5}$/.test(s)) out.push(s);
   }
   return out;
@@ -51,11 +54,90 @@ function tickersFromHeadline(headline: string | undefined, allow: Set<string>): 
 
 /** Uppercase tokens that look like tickers but are usually English / media (not equities). */
 const HEADLINE_TICKER_STOPWORDS = new Set([
-  "THE", "AND", "FOR", "ARE", "BUT", "NOT", "YOU", "ALL", "CAN", "HER", "WAS", "ONE", "OUR", "OUT", "DAY", "GET", "HAS",
-  "HIM", "HIS", "HOW", "ITS", "MAY", "NEW", "NOW", "OLD", "SEE", "TWO", "WHO", "BOY", "DID", "LET", "PUT", "SAY", "SHE",
-  "TOO", "USE", "ANY", "BAD", "BIG", "END", "FAR", "FEW", "GOT", "MAN", "MEN", "MET", "MRS", "OFF", "OWN", "RED", "RUN",
-  "SAID", "SAW", "SET", "SIX", "TEN", "TOP", "TRY", "VIA", "WAY", "WHY", "WIN", "YES", "YET", "CNN", "BBC", "USA", "CEO",
-  "CFO", "IPO", "NYSE", "SEC", "GDP", "CPI", "EPS", "ATH", "YTD", "LAST", "NEXT", "WEEK", "YEAR", "TIME", "JUST", "OVER",
+  "THE",
+  "AND",
+  "FOR",
+  "ARE",
+  "BUT",
+  "NOT",
+  "YOU",
+  "ALL",
+  "CAN",
+  "HER",
+  "WAS",
+  "ONE",
+  "OUR",
+  "OUT",
+  "DAY",
+  "GET",
+  "HAS",
+  "HIM",
+  "HIS",
+  "HOW",
+  "ITS",
+  "MAY",
+  "NEW",
+  "NOW",
+  "OLD",
+  "SEE",
+  "TWO",
+  "WHO",
+  "BOY",
+  "DID",
+  "LET",
+  "PUT",
+  "SAY",
+  "SHE",
+  "TOO",
+  "USE",
+  "ANY",
+  "BAD",
+  "BIG",
+  "END",
+  "FAR",
+  "FEW",
+  "GOT",
+  "MAN",
+  "MEN",
+  "MET",
+  "MRS",
+  "OFF",
+  "OWN",
+  "RED",
+  "RUN",
+  "SAID",
+  "SAW",
+  "SET",
+  "SIX",
+  "TEN",
+  "TOP",
+  "TRY",
+  "VIA",
+  "WAY",
+  "WHY",
+  "WIN",
+  "YES",
+  "YET",
+  "CNN",
+  "BBC",
+  "USA",
+  "CEO",
+  "CFO",
+  "IPO",
+  "NYSE",
+  "SEC",
+  "GDP",
+  "CPI",
+  "EPS",
+  "ATH",
+  "YTD",
+  "LAST",
+  "NEXT",
+  "WEEK",
+  "YEAR",
+  "TIME",
+  "JUST",
+  "OVER",
 ]);
 
 function headlineTickerCandidates(text: string | undefined): string[] {
@@ -118,7 +200,19 @@ function pickSymbolsFromNews(
 function headlineSentiment(text: string): number {
   const t = text.toLowerCase();
   let score = 0;
-  const neg = ["crash", "plunge", "lawsuit", "bear", "miss", "cut", "fraud", "probe", "downgrade", "bankrupt", "selloff"];
+  const neg = [
+    "crash",
+    "plunge",
+    "lawsuit",
+    "bear",
+    "miss",
+    "cut",
+    "fraud",
+    "probe",
+    "downgrade",
+    "bankrupt",
+    "selloff",
+  ];
   const pos = ["beat", "upgrade", "surge", "record", "growth", "bull", "breakthrough", "expands", "soars", "rally"];
   for (const w of neg) if (t.includes(w)) score -= 0.12;
   for (const w of pos) if (t.includes(w)) score += 0.12;
@@ -136,7 +230,14 @@ export const finnhubBundleGatherer: Gatherer = {
     const maxSymbols = Math.min(30, Math.max(1, ctx.config.finnhub_max_symbols ?? 10));
     const ttl = ctx.config.finnhub_cache_ttl_seconds ?? 240;
     const allow = new Set(
-      (ctx.config.finnhub_symbols || []).map((s) => s.replace(/^[\s$]+/, "").toUpperCase().trim()).filter(Boolean)
+      (ctx.config.finnhub_symbols || [])
+        .map((s) =>
+          s
+            .replace(/^[\s$]+/, "")
+            .toUpperCase()
+            .trim()
+        )
+        .filter(Boolean)
     );
     const blocked = new Set((ctx.config.ticker_blacklist || []).map((s) => s.toUpperCase()));
     const sourceWeight = SOURCE_CONFIG.weights.finnhub_bundle ?? 0.82;

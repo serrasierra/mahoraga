@@ -4,9 +4,9 @@ import type { Env } from "./env.d";
 import { handleCronEvent } from "./jobs/cron";
 import { MahoragaMcpAgent } from "./mcp/agent";
 
+export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
 export { SessionDO } from "./durable-objects/session";
 export { MahoragaMcpAgent };
-export { MahoragaHarness } from "./durable-objects/mahoraga-harness";
 
 function withCors(response: Response): Response {
   const headers = new Headers(response.headers);
@@ -54,34 +54,38 @@ export default {
     }
 
     if (url.pathname === "/health") {
-      return withCors(new Response(
-        JSON.stringify({
-          status: "ok",
-          timestamp: new Date().toISOString(),
-          environment: env.ENVIRONMENT,
-        }),
-        {
-          headers: { "Content-Type": "application/json" },
-        }
-      ));
+      return withCors(
+        new Response(
+          JSON.stringify({
+            status: "ok",
+            timestamp: new Date().toISOString(),
+            environment: env.ENVIRONMENT,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      );
     }
 
     if (url.pathname === "/") {
-      return withCors(new Response(
-        JSON.stringify({
-          name: "mahoraga",
-          version: "0.3.0",
-          description: "Autonomous LLM-powered trading agent on Cloudflare Workers",
-          endpoints: {
-            health: "/health",
-            mcp: "/mcp (auth required)",
-            agent: "/agent/* (auth required)",
-          },
-        }),
-        {
-          headers: { "Content-Type": "application/json" },
-        }
-      ));
+      return withCors(
+        new Response(
+          JSON.stringify({
+            name: "mahoraga",
+            version: "0.3.0",
+            description: "Autonomous LLM-powered trading agent on Cloudflare Workers",
+            endpoints: {
+              health: "/health",
+              mcp: "/mcp (auth required)",
+              agent: "/agent/* (auth required)",
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      );
     }
 
     if (url.pathname.startsWith("/mcp")) {
@@ -100,10 +104,12 @@ export default {
       const tokenHash = request.headers.get("Authorization")?.slice(7, 15) || "anon";
       const rateCheck = await checkRateLimit(env, `agent-${tokenHash}`);
       if (!rateCheck.allowed) {
-        return withCors(new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
-          status: 429,
-          headers: { "Content-Type": "application/json" },
-        }));
+        return withCors(
+          new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
       }
       await incrementRequest(env, `agent-${tokenHash}`);
 
@@ -111,13 +117,15 @@ export default {
       const agentPath = url.pathname.replace("/agent", "") || "/status";
       const agentUrl = new URL(agentPath, "http://harness");
       agentUrl.search = url.search;
-      return withCors(await stub.fetch(
-        new Request(agentUrl.toString(), {
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-        })
-      ));
+      return withCors(
+        await stub.fetch(
+          new Request(agentUrl.toString(), {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+          })
+        )
+      );
     }
 
     return withCors(new Response("Not found", { status: 404 }));

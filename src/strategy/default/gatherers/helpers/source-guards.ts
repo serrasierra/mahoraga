@@ -6,7 +6,9 @@ type AlpacaLike = {
     getAsset: (symbol: string) => Promise<{ tradable?: boolean; exchange?: string } | null>;
   };
   marketData: {
-    getSnapshot: (symbol: string) => Promise<{ latest_trade?: { price?: number }; latest_quote?: { ask_price?: number } } | null>;
+    getSnapshot: (
+      symbol: string
+    ) => Promise<{ latest_trade?: { price?: number }; latest_quote?: { ask_price?: number } } | null>;
   };
 };
 
@@ -50,7 +52,7 @@ export async function resolveTradableEquityPrice(
   allowedExchanges: string[]
 ): Promise<number | null> {
   const normalized = symbol.toUpperCase().trim();
-  if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(normalized)) return null;
+  if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return null;
 
   const asset = await alpaca.trading.getAsset(normalized).catch(() => null);
   if (!asset?.tradable) return null;
@@ -75,11 +77,7 @@ const KV_SRC_PREFIX = "mahoraga:src:";
 /**
  * Run a source that does not require an API key (still gated by config flag).
  */
-export function shouldRunSourceNoKey(
-  ctx: StrategyContext,
-  sourceLabel: string,
-  enabled: boolean | undefined
-): boolean {
+export function shouldRunSourceNoKey(ctx: StrategyContext, sourceLabel: string, enabled: boolean | undefined): boolean {
   if (!enabled) {
     ctx.log(sourceLabel, "disabled_by_config", {});
     return false;
@@ -183,4 +181,3 @@ export async function cachedJsonFetch<T>(
     return { data: null, fromCache: false };
   }
 }
-

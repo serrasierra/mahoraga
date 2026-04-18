@@ -15,13 +15,13 @@
 
 import type { Strategy } from "../types";
 import { DEFAULT_CONFIG } from "./config";
-import { cryptoGatherer } from "./gatherers/crypto";
-import { optionsFlowGatherer } from "./gatherers/options-flow";
 import { congressionalTradesGatherer } from "./gatherers/congressional-trades";
 import { contractAwardsGatherer } from "./gatherers/contract-awards";
+import { cryptoGatherer } from "./gatherers/crypto";
 import { cryptoFearGreedGatherer } from "./gatherers/crypto-fear-greed";
 import { finnhubBundleGatherer } from "./gatherers/finnhub-bundle";
 import { fredMacroGatherer } from "./gatherers/fred-macro";
+import { optionsFlowGatherer } from "./gatherers/options-flow";
 import { planMarkerGatherer } from "./gatherers/plan-marker";
 import { polygonNewsGatherer } from "./gatherers/polygon-news";
 import { redditGatherer } from "./gatherers/reddit";

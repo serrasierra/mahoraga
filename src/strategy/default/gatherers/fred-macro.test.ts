@@ -35,10 +35,12 @@ describe("fredMacroGatherer", () => {
   it("returns empty when disabled or no key", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const { fredMacroGatherer } = await import("./fred-macro");
-    expect(await fredMacroGatherer.gather(baseCtx({ config: { ...baseCtx().config, fred_enabled: false } }))).toEqual([]);
-    expect(await fredMacroGatherer.gather(baseCtx({ env: { FRED_API_KEY: undefined, CACHE: baseCtx().env.CACHE } }))).toEqual(
+    expect(await fredMacroGatherer.gather(baseCtx({ config: { ...baseCtx().config, fred_enabled: false } }))).toEqual(
       []
     );
+    expect(
+      await fredMacroGatherer.gather(baseCtx({ env: { FRED_API_KEY: undefined, CACHE: baseCtx().env.CACHE } }))
+    ).toEqual([]);
   });
 
   it("emits conservative SPY/QQQ signals when observations parse", async () => {

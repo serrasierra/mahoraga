@@ -36,7 +36,7 @@ function pickTicker(row: ContractAwardRow): string {
 
 function parseAmount(row: ContractAwardRow): number {
   const numeric = [row.amount, row.obligated_amount, row.value]
-    .map((value) => (typeof value === "string" ? Number(value.replace(/[^0-9.\-]/g, "")) : Number(value || 0)))
+    .map((value) => (typeof value === "string" ? Number(value.replace(/[^0-9.-]/g, "")) : Number(value || 0)))
     .find((value) => Number.isFinite(value) && value > 0);
   return numeric || 0;
 }

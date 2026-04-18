@@ -38,12 +38,12 @@ describe("finnhubBundleGatherer", () => {
     vi.stubGlobal("fetch", vi.fn());
 
     const { finnhubBundleGatherer } = await import("./finnhub-bundle");
-    expect(await finnhubBundleGatherer.gather(baseCtx({ config: { ...baseCtx().config, finnhub_enabled: false } }))).toEqual(
-      []
-    );
-    expect(await finnhubBundleGatherer.gather(baseCtx({ env: { FINNHUB_API_KEY: undefined, CACHE: baseCtx().env.CACHE } }))).toEqual(
-      []
-    );
+    expect(
+      await finnhubBundleGatherer.gather(baseCtx({ config: { ...baseCtx().config, finnhub_enabled: false } }))
+    ).toEqual([]);
+    expect(
+      await finnhubBundleGatherer.gather(baseCtx({ env: { FINNHUB_API_KEY: undefined, CACHE: baseCtx().env.CACHE } }))
+    ).toEqual([]);
   });
 
   it("uses cache hit and skips fetch", async () => {
@@ -84,7 +84,9 @@ describe("finnhubBundleGatherer", () => {
   });
 
   it("falls back after 429 when stale cache exists", async () => {
-    const stale = JSON.stringify([{ datetime: Math.floor(Date.now() / 1000), headline: "x", related: "AAPL", summary: "" }]);
+    const stale = JSON.stringify([
+      { datetime: Math.floor(Date.now() / 1000), headline: "x", related: "AAPL", summary: "" },
+    ]);
     let getCalls = 0;
     const cacheGet = vi.fn(async () => {
       getCalls++;
@@ -180,9 +182,7 @@ describe("finnhubBundleGatherer", () => {
       marketData: { getSnapshot: vi.fn().mockResolvedValue({ latest_trade: { price: 10 } }) },
     });
 
-    const allow = new Set(
-      Array.from({ length: 20 }, (_, i) => `SYM${i}`).concat(["SYM0"])
-    );
+    const allow = new Set(Array.from({ length: 20 }, (_, i) => `SYM${i}`).concat(["SYM0"]));
     const ctx = baseCtx({
       config: {
         ...baseCtx().config,

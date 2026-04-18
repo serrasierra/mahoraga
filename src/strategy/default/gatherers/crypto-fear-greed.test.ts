@@ -32,9 +32,9 @@ describe("cryptoFearGreedGatherer", () => {
   it("returns empty when disabled", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const { cryptoFearGreedGatherer } = await import("./crypto-fear-greed");
-    expect(await cryptoFearGreedGatherer.gather(baseCtx({ config: { ...baseCtx().config, crypto_fng_enabled: false } }))).toEqual(
-      []
-    );
+    expect(
+      await cryptoFearGreedGatherer.gather(baseCtx({ config: { ...baseCtx().config, crypto_fng_enabled: false } }))
+    ).toEqual([]);
   });
 
   it("parses string and numeric value variants", async () => {

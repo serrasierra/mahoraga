@@ -219,7 +219,9 @@ export function evaluateExperimentThresholds(
     },
     {
       name: "cost_per_trade_within_20pct",
-      passed: current.costs.cost_per_executed_trade <= baseline.costs.cost_per_executed_trade * 1.2 || baseline.costs.cost_per_executed_trade === 0,
+      passed:
+        current.costs.cost_per_executed_trade <= baseline.costs.cost_per_executed_trade * 1.2 ||
+        baseline.costs.cost_per_executed_trade === 0,
       value: current.costs.cost_per_executed_trade,
       baseline_value: baseline.costs.cost_per_executed_trade,
       note: "Allows up to 20% higher cost per executed trade.",

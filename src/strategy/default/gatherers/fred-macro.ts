@@ -96,8 +96,7 @@ export const fredMacroGatherer: Gatherer = {
       return [];
     }
 
-    const combined =
-      biases.reduce((a, b) => a + b, 0) / biases.length;
+    const combined = biases.reduce((a, b) => a + b, 0) / biases.length;
     const macroRaw = boundedSentiment(combined);
     const clampedMacro = boundedSentiment(Math.max(-0.12, Math.min(0.12, macroRaw)));
 

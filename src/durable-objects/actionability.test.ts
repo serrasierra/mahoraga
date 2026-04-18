@@ -38,9 +38,7 @@ describe("determineSignalActionability", () => {
   });
 
   it("rejects equity with missing asset", async () => {
-    const result = await determineSignalActionability(
-      createDeps({ getAsset: vi.fn(async () => null) })
-    );
+    const result = await determineSignalActionability(createDeps({ getAsset: vi.fn(async () => null) }));
     expect(result.is_actionable).toBe(false);
     expect(result.reason).toBe("asset_not_found");
   });

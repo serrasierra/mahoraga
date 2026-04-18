@@ -38,7 +38,7 @@ interface OptionsFlowResponse {
 function asNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
-    const stripped = value.replace(/[^0-9.\-]/g, "");
+    const stripped = value.replace(/[^0-9.-]/g, "");
     const parsed = Number(stripped);
     return Number.isFinite(parsed) ? parsed : 0;
   }

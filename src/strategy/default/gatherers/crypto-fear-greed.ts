@@ -6,12 +6,7 @@ import type { Signal } from "../../../core/types";
 import { createAlpacaProviders } from "../../../providers/alpaca";
 import type { Gatherer, StrategyContext } from "../../types";
 import { SOURCE_CONFIG } from "../config";
-import {
-  boundedSentiment,
-  cachedJsonFetch,
-  shouldRunSourceNoKey,
-  toSignalReason,
-} from "./helpers/source-guards";
+import { boundedSentiment, cachedJsonFetch, shouldRunSourceNoKey, toSignalReason } from "./helpers/source-guards";
 
 function parseFngIndex(payload: unknown): number | null {
   if (!payload || typeof payload !== "object") return null;
