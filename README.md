@@ -180,7 +180,7 @@ If the Pages app shows **No Git connection**, it was deployed by **direct upload
 
 After the first successful build from Git, the UI should show the Git connection. **Pull requests** get **Preview** URLs automatically.
 
-Repo hints: optional [`dashboard/wrangler.toml`](dashboard/wrangler.toml) (`name` / `pages_build_output_dir`), SPA fallback [`dashboard/public/_redirects`](dashboard/public/_redirects).
+Repo hints: optional [`dashboard/wrangler.toml`](dashboard/wrangler.toml) (`name` / `pages_build_output_dir`). **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
 
 ### 2) `VITE_MAHORAGA_API_BASE` (required for hosted builds)
 
