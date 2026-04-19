@@ -150,71 +150,97 @@ curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
   http://localhost:8787/agent/enable
 ```
 
-## Hosted Dashboard (Phone + Anywhere)
+## Hosted dashboard (Cloudflare Pages) + Worker API
 
-The dashboard (main monitoring + experiments panel) can be hosted on Cloudflare Pages and secured with Cloudflare Access.
+The React dashboard (monitoring + experiments) is a **static site** on **Cloudflare Pages**. The trading **API** is a separate **Cloudflare Worker**. This section describes the **recommended setup**: **Git-connected Pages** for the dashboard + **GitHub Actions** for the Worker ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-### 1) Configure production API base
+### Deploy map (what happens on `git push`)
 
-Use [`dashboard/env.example`](dashboard/env.example) as reference:
+| Piece | What deploys it | When |
+|--------|-------------------|------|
+| **Worker** (`src/`, Durable Object) | GitHub Actions on **`main`** | After CI passes: `npm run deploy` (`wrangler deploy`). Needs repo secret **`CLOUDFLARE_API_TOKEN`**. |
+| **Dashboard** (`dashboard/`) | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below). |
+
+Pushing to `main` updates **both**, but through **two** pipelines—by design. The dashboard does **not** use `wrangler pages deploy` in CI in this workflow (avoids double-deploying the same site).
+
+### 1) Connect GitHub to your Pages project (fixes “No Git connection”)
+
+If the Pages app shows **No Git connection**, it was deployed by **direct upload** (`wrangler pages deploy`) instead of Cloudflare building from Git. Connect the repo once:
+
+1. **Cloudflare** → **Workers & Pages** → select your Pages project (e.g. `mahoraga-dashboard`) → **Settings** → **Builds & deployments**.
+2. **Connect to Git** → **GitHub** → authorize the Cloudflare GitHub App if prompted → select this repository.
+3. Set **build configuration**:
+   - **Production branch:** `main` (or your default branch).
+   - **Root directory:** `dashboard`
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+4. **Environment variables** (same settings area → **Variables and Secrets**):
+   - **`VITE_MAHORAGA_API_BASE`** = `https://<your-worker-subdomain>.workers.dev/agent`  
+   - Apply to **Production** and **Preview** (Preview builds use Preview env; they do not inherit Production-only vars).
+
+After the first successful build from Git, the UI should show the Git connection. **Pull requests** get **Preview** URLs automatically.
+
+Repo hints: optional [`dashboard/wrangler.toml`](dashboard/wrangler.toml) (`name` / `pages_build_output_dir`), SPA fallback [`dashboard/public/_redirects`](dashboard/public/_redirects).
+
+### 2) `VITE_MAHORAGA_API_BASE` (required for hosted builds)
+
+Use [`dashboard/env.example`](dashboard/env.example) as reference. The value must include **`https://`**, your Worker host, and the **`/agent`** path:
 
 ```bash
 VITE_MAHORAGA_API_BASE=https://your-worker-subdomain.workers.dev/agent
 ```
 
-In Cloudflare Pages project settings, set:
-- variable: `VITE_MAHORAGA_API_BASE`
-- value: your Worker URL ending in `/agent`
+Vite inlines `VITE_*` at **`npm run build`** time. If unset, the app falls back to `/api` (works with **local** `npm run dev` + Vite proxy; **wrong** on Pages).
 
-Keep local dev unchanged (`/api` proxy in `vite.config.ts`).
+Local dev: leave unset to use [`dashboard/vite.config.ts`](dashboard/vite.config.ts) proxy to `wrangler dev`.
 
-### 2) Deploy to Cloudflare Pages
+### 3) Verify a production-like build locally (optional)
 
-Recommended Pages settings:
-- Root directory: `dashboard`
-- Build command: `npm run build`
-- Build output directory: `dist`
+From the **repo root**:
 
-Optional `wrangler` Pages config is included at [`dashboard/wrangler.toml`](dashboard/wrangler.toml).
-SPA fallback redirect is included at [`dashboard/public/_redirects`](dashboard/public/_redirects).
+```bash
+npm run build:dashboard
+```
 
-#### Worker vs Pages (two separate deploys)
+This only checks that `dashboard/` compiles; **production** dashboard updates come from **Git → Pages**, not from this command.
 
-- **`npx wrangler deploy` (repo root)** publishes the **Worker API** only (`src/`).
-- **Cloudflare Pages** publishes the **React dashboard** (`dashboard/dist`).
+### 4) Emergency: manual `wrangler pages deploy`
 
-Updating the Worker does **not** update the hosted UI, and vice versa. Plan releases as **two steps** unless you automate both (see below).
-
-#### Why `VITE_MAHORAGA_API_BASE` must exist at **build** time
-
-Vite inlines `VITE_*` variables when it runs **`npm run build`**. If the variable is missing, the bundle falls back to `/api` (fine for **local** `npm run dev` with the Vite proxy; **wrong** on static Pages).
-
-- **Git-connected Pages:** set `VITE_MAHORAGA_API_BASE` under **Settings → Environment variables** for **Preview** and **Production**, then let Cloudflare run `npm run build`. Each environment has its own values—Preview builds do **not** use Production-only vars.
-- **Manual deploy from your laptop:** setting the variable in the Cloudflare UI does **not** affect a bundle you built locally. You must export it **before** `npm run build`, then upload `dist`:
+If you must upload a build without going through Git (rare):
 
 ```bash
 cd dashboard
 export VITE_MAHORAGA_API_BASE="https://<your-worker>.workers.dev/agent"
 npm run build
-npx wrangler pages deploy dist --project-name <your-pages-project> --branch=main
+npx wrangler pages deploy dist --project-name <your-pages-project>
 ```
 
-(Use `dist` as the path when your shell’s cwd is `dashboard/`; from repo root the directory is `dashboard/dist`.)
+Use `dist` when the shell cwd is **`dashboard/`** (not `dashboard/dist`). The Cloudflare UI may still show **No Git connection** if you rely on this path for routine releases—prefer **§1** instead.
 
-Sanity check: search the built `dist/assets/index-*.js` for your `workers.dev` host—if it’s absent, the build did not see the variable.
+Sanity check: the built `dist/assets/index-*.js` should contain your `workers.dev` host.
+
+#### Worker vs Pages (two separate deploys)
+
+- **`wrangler deploy` (repo root)** → Worker API only.
+- **Pages** → static `dashboard/dist` only.
+
+Updating one does not update the other.
 
 #### Troubleshooting: OFFLINE / “Hosted build missing API URL”
 
-1. Confirm **Preview** and **Production** both have `VITE_MAHORAGA_API_BASE` if you use both URLs.
-2. **Redeploy after** changing env vars (new build required).
-3. Hard-refresh or use a private window (old JS may be cached).
-4. **API token:** Pages preview URLs are a different origin than production—paste `MAHORAGA_API_TOKEN` again under Settings on each hostname.
+1. **`VITE_MAHORAGA_API_BASE`** set for **Preview** and **Production** in Pages, then **redeploy** (new build picks up env changes).
+2. Hard-refresh or private window (cached JS).
+3. **API token:** preview and production hostnames are different **origins**—enter `MAHORAGA_API_TOKEN` in **Settings** on each.
 
-#### Future: simpler “single pipeline” (revisit)
+#### Alternative: deploy dashboard only via GitHub Actions
 
-A single CI workflow (e.g. GitHub Actions) can run **`wrangler deploy`** for the Worker and **`npm run build` + `wrangler pages deploy`** for the dashboard on every push to `main`, with `VITE_MAHORAGA_API_BASE` supplied as a repo/Actions secret. That keeps API + UI in sync and avoids forgetting the export-before-build step. Worth setting up when you next have time to wire secrets and branch protection.
+You can instead add a workflow job that runs `npm run build` in `dashboard/` and `wrangler pages deploy`. The Pages dashboard may still show **No Git connection** (uploads via API). This repo standard is **Git-connected Pages (§1)** for the dashboard.
 
-### 3) Lock down with Cloudflare Access
+### Cloudflare MCP (Cursor IDE)
+
+If you use the **Cloudflare MCP** in Cursor, you can list Workers, inspect builds/logs, and search Cloudflare docs while developing. That helps **you** operate Cloudflare faster; it is **not** something the Mahoraga Worker calls at runtime.
+
+### 5) Lock down with Cloudflare Access
 
 1. Cloudflare Dashboard -> Zero Trust -> Access -> Applications -> Add application.
 2. Select **Self-hosted**.
@@ -226,14 +252,14 @@ A single CI workflow (e.g. GitHub Actions) can run **`wrangler deploy`** for the
 
 This ensures the dashboard URL is not publicly reachable.
 
-### 4) Token handling model (safe for frontend)
+### 6) Token handling model (safe for frontend)
 
 - Enter `MAHORAGA_API_TOKEN` in dashboard Settings -> API Authentication.
 - Token is stored only in browser `localStorage`.
 - Token is **not** embedded in frontend build variables.
 - Use **Clear Token** in settings to remove it immediately on shared devices.
 
-### 5) Hosted verification checklist
+### 7) Hosted verification checklist
 
 After deploy + Access:
 

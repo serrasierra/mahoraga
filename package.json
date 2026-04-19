@@ -28,7 +28,8 @@
     "local:disable": "bash scripts/local-agent.sh disable",
     "local:trigger": "bash scripts/local-agent.sh trigger",
     "local:logs": "bash scripts/local-agent.sh logs",
-    "local:dashboard": "npm run dev --prefix dashboard"
+    "local:dashboard": "npm run dev --prefix dashboard",
+    "build:dashboard": "npm run build --prefix dashboard"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.35",
