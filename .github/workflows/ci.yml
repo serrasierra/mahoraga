@@ -65,17 +65,25 @@ jobs:
             echo "Using committed wrangler.jsonc"
             exit 0
           fi
-          if [ -z "${D1_DATABASE_ID:-}" ] || [ -z "${KV_NAMESPACE_ID:-}" ] || [ -z "${KV_PREVIEW_NAMESPACE_ID:-}" ]; then
-            echo "::error::CI needs either a committed wrangler.jsonc, or Actions secrets D1_DATABASE_ID, KV_NAMESPACE_ID, and KV_PREVIEW_NAMESPACE_ID (copy from your local wrangler.jsonc / Cloudflare dashboard)."
-            exit 1
+          if [ -n "${WRANGLER_JSONC:-}" ]; then
+            echo "$WRANGLER_JSONC" > wrangler.jsonc
+            echo "Wrote wrangler.jsonc from WRANGLER_JSONC secret"
+            exit 0
           fi
-          cp wrangler.example.jsonc wrangler.jsonc
-          sed -i \
-            -e "s|<YOUR_D1_DATABASE_ID>|${D1_DATABASE_ID}|g" \
-            -e "s|<YOUR_KV_NAMESPACE_ID>|${KV_NAMESPACE_ID}|g" \
-            -e "s|<YOUR_KV_PREVIEW_NAMESPACE_ID>|${KV_PREVIEW_NAMESPACE_ID}|g" \
-            wrangler.jsonc
+          if [ -n "${D1_DATABASE_ID:-}" ] && [ -n "${KV_NAMESPACE_ID:-}" ] && [ -n "${KV_PREVIEW_NAMESPACE_ID:-}" ]; then
+            cp wrangler.example.jsonc wrangler.jsonc
+            sed -i \
+              -e "s|<YOUR_D1_DATABASE_ID>|${D1_DATABASE_ID}|g" \
+              -e "s|<YOUR_KV_NAMESPACE_ID>|${KV_NAMESPACE_ID}|g" \
+              -e "s|<YOUR_KV_PREVIEW_NAMESPACE_ID>|${KV_PREVIEW_NAMESPACE_ID}|g" \
+              wrangler.jsonc
+            echo "Wrote wrangler.jsonc from D1/KV secrets"
+            exit 0
+          fi
+          echo "::error::Add one of: (1) committed wrangler.jsonc, (2) Actions secret WRANGLER_JSONC (full file contents from your machine), or (3) secrets D1_DATABASE_ID + KV_NAMESPACE_ID + KV_PREVIEW_NAMESPACE_ID."
+          exit 1
         env:
+          WRANGLER_JSONC: ${{ secrets.WRANGLER_JSONC }}
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
           KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
           KV_PREVIEW_NAMESPACE_ID: ${{ secrets.KV_PREVIEW_NAMESPACE_ID }}

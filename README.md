@@ -4,11 +4,11 @@
 
 An autonomous, LLM-powered trading agent that runs 24/7 on Cloudflare Workers.
 
-[![Discord](https://img.shields.io/discord/1467592472158015553?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/vMFnHe2YBh)
+[Discord](https://discord.gg/vMFnHe2YBh)
 
 MAHORAGA monitors social sentiment from StockTwits and Reddit, ingests optional Polygon news catalysts, uses AI (OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK) to analyze signals, and executes trades through Alpaca. It runs as a Cloudflare Durable Object with persistent state, automatic restarts, and 24/7 crypto trading support.
 
-<img width="1278" height="957" alt="dashboard" src="https://github.com/user-attachments/assets/56473ab6-e2c6-45fc-9e32-cf85e69f1a2d" />
+
 
 ## Features
 
@@ -152,14 +152,16 @@ curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
 
 ## Hosted dashboard (Cloudflare Pages) + Worker API
 
-The React dashboard (monitoring + experiments) is a **static site** on **Cloudflare Pages**. The trading **API** is a separate **Cloudflare Worker**. This section describes the **recommended setup**: **Git-connected Pages** for the dashboard + **GitHub Actions** for the Worker ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+The React dashboard (monitoring + experiments) is a **static site** on **Cloudflare Pages**. The trading **API** is a separate **Cloudflare Worker**. This section describes the **recommended setup**: **Git-connected Pages** for the dashboard + **GitHub Actions** for the Worker (`[.github/workflows/ci.yml](.github/workflows/ci.yml)`).
 
 ### Deploy map (what happens on `git push`)
 
-| Piece | What deploys it | When |
-|--------|-------------------|------|
-| **Worker** (`src/`, Durable Object) | GitHub Actions on **`main`** | After CI passes: `npm run deploy` (`wrangler deploy`). Needs repo secret **`CLOUDFLARE_API_TOKEN`**. |
-| **Dashboard** (`dashboard/`) | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below). |
+
+| Piece                               | What deploys it                       | When                                                                                                         |
+| ----------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Secrets: `**CLOUDFLARE_API_TOKEN**` plus either `**WRANGLER_JSONC**` (full local `wrangler.jsonc` body) or `**D1_DATABASE_ID**` + `**KV_NAMESPACE_ID**` + `**KV_PREVIEW_NAMESPACE_ID**`, or commit `wrangler.jsonc`. |
+| **Dashboard** (`dashboard/`)        | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below). |
+
 
 Pushing to `main` updates **both**, but through **two** pipelines—by design. The dashboard does **not** use `wrangler pages deploy` in CI in this workflow (avoids double-deploying the same site).
 
@@ -170,29 +172,30 @@ If the Pages app shows **No Git connection**, it was deployed by **direct upload
 1. **Cloudflare** → **Workers & Pages** → select your Pages project (e.g. `mahoraga-dashboard`) → **Settings** → **Builds & deployments**.
 2. **Connect to Git** → **GitHub** → authorize the Cloudflare GitHub App if prompted → select this repository.
 3. Set **build configuration**:
-   - **Production branch:** `main` (or your default branch).
-   - **Root directory:** `dashboard`
-   - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
+  - **Production branch:** `main` (or your default branch).
+  - **Root directory:** `dashboard`
+  - **Build command:** `npm run build`
+  - **Build output directory:** `dist`
 4. **Environment variables** (same settings area → **Variables and Secrets**):
-   - **`VITE_MAHORAGA_API_BASE`** = `https://<your-worker-subdomain>.workers.dev/agent`  
-   - Apply to **Production** and **Preview** (Preview builds use Preview env; they do not inherit Production-only vars).
+  - `**VITE_MAHORAGA_API_BASE**` = `https://<your-worker-subdomain>.workers.dev/agent` (build-time; also read by the Pages Function `/mahoraga-runtime-config` at runtime if the bundle did not embed it).
+  - Optionally set `**MAHORAGA_PUBLIC_API_BASE**` to the same URL (non-`VITE_` alias for that function).
+  - Apply to **Production** and **Preview** (Preview builds use Preview env; they do not inherit Production-only vars).
 
 After the first successful build from Git, the UI should show the Git connection. **Pull requests** get **Preview** URLs automatically.
 
-Repo hints: optional [`dashboard/wrangler.toml`](dashboard/wrangler.toml) (`name` / `pages_build_output_dir`). **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
+Repo hints: optional `[dashboard/wrangler.toml](dashboard/wrangler.toml)` (`name` / `pages_build_output_dir`). **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
 
 ### 2) `VITE_MAHORAGA_API_BASE` (required for hosted builds)
 
-Use [`dashboard/env.example`](dashboard/env.example) as reference. The value must include **`https://`**, your Worker host, and the **`/agent`** path:
+Use `[dashboard/env.example](dashboard/env.example)` as reference. The value must include `**https://`**, your Worker host, and the `**/agent**` path:
 
 ```bash
 VITE_MAHORAGA_API_BASE=https://your-worker-subdomain.workers.dev/agent
 ```
 
-Vite inlines `VITE_*` at **`npm run build`** time. If unset, the app falls back to `/api` (works with **local** `npm run dev` + Vite proxy; **wrong** on Pages).
+Vite inlines `VITE_*` at `**npm run build**` time. If unset, the app falls back to `/api` (works with **local** `npm run dev` + Vite proxy; **wrong** on Pages).
 
-Local dev: leave unset to use [`dashboard/vite.config.ts`](dashboard/vite.config.ts) proxy to `wrangler dev`.
+Local dev: leave unset to use `[dashboard/vite.config.ts](dashboard/vite.config.ts)` proxy to `wrangler dev`.
 
 ### 3) Verify a production-like build locally (optional)
 
@@ -215,20 +218,20 @@ npm run build
 npx wrangler pages deploy dist --project-name <your-pages-project>
 ```
 
-Use `dist` when the shell cwd is **`dashboard/`** (not `dashboard/dist`). The Cloudflare UI may still show **No Git connection** if you rely on this path for routine releases—prefer **§1** instead.
+Use `dist` when the shell cwd is `**dashboard/**` (not `dashboard/dist`). The Cloudflare UI may still show **No Git connection** if you rely on this path for routine releases—prefer **§1** instead.
 
 Sanity check: the built `dist/assets/index-*.js` should contain your `workers.dev` host.
 
 #### Worker vs Pages (two separate deploys)
 
-- **`wrangler deploy` (repo root)** → Worker API only.
+- `**wrangler deploy` (repo root)** → Worker API only.
 - **Pages** → static `dashboard/dist` only.
 
 Updating one does not update the other.
 
 #### Troubleshooting: OFFLINE / “Hosted build missing API URL”
 
-1. **`VITE_MAHORAGA_API_BASE`** set for **Preview** and **Production** in Pages, then **redeploy** (new build picks up env changes).
+1. `**VITE_MAHORAGA_API_BASE`** set for **Preview** and **Production** in Pages, then **redeploy** (new build picks up env changes).
 2. Hard-refresh or private window (cached JS).
 3. **API token:** preview and production hostnames are different **origins**—enter `MAHORAGA_API_TOKEN` in **Settings** on each.
 
@@ -246,8 +249,8 @@ If you use the **Cloudflare MCP** in Cursor, you can list Workers, inspect build
 2. Select **Self-hosted**.
 3. Application domain: your Pages hostname (or custom domain).
 4. Policy:
-   - Action: **Allow**
-   - Include: your email (or allowed email list/group)
+  - Action: **Allow**
+  - Include: your email (or allowed email list/group)
 5. Save and test login from an incognito window.
 
 This ensures the dashboard URL is not publicly reachable.
@@ -267,9 +270,9 @@ After deploy + Access:
 2. Log in via Cloudflare Access.
 3. Paste API token in Settings and save/reload.
 4. Verify:
-   - status/account panels load
-   - activity logs populate
-   - experiment panel loads run summaries/details
+  - status/account panels load
+  - activity logs populate
+  - experiment panel loads run summaries/details
 5. If you see Unauthorized (401), re-check token and Worker URL.
 
 ## Custom Strategies
@@ -289,13 +292,15 @@ export const activeStrategy = myStrategy;
 
 ### What you can customize
 
-| Component | File | What it does |
-|-----------|------|--------------|
-| **Gatherers** | `gatherers/*.ts` | Fetch signals from data sources (StockTwits, Reddit, etc.) |
-| **Prompts** | `prompts/*.ts` | LLM prompt templates for research and analysis |
-| **Entry rules** | `rules/entries.ts` | Decide which signals to buy |
-| **Exit rules** | `rules/exits.ts` | Decide when to sell positions |
-| **Config** | `config.ts` | Default parameters and source weights |
+
+| Component       | File               | What it does                                               |
+| --------------- | ------------------ | ---------------------------------------------------------- |
+| **Gatherers**   | `gatherers/*.ts`   | Fetch signals from data sources (StockTwits, Reddit, etc.) |
+| **Prompts**     | `prompts/*.ts`     | LLM prompt templates for research and analysis             |
+| **Entry rules** | `rules/entries.ts` | Decide which signals to buy                                |
+| **Exit rules**  | `rules/exits.ts`   | Decide when to sell positions                              |
+| **Config**      | `config.ts`        | Default parameters and source weights                      |
+
 
 You can reuse default gatherers, mix in custom ones, override prompts, and define your own entry/exit rules — all without touching core files.
 
@@ -333,29 +338,33 @@ See `docs/harness.html` for the full customization guide.
 
 ## Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `max_positions` | 5 | Maximum concurrent positions |
-| `max_position_value` | 5000 | Maximum $ per position |
-| `take_profit_pct` | 10 | Take profit percentage |
-| `stop_loss_pct` | 5 | Stop loss percentage |
-| `min_sentiment_score` | 0.3 | Minimum sentiment to consider |
-| `min_analyst_confidence` | 0.6 | Minimum LLM confidence to trade |
-| `crypto_symbols` | BTC/USD, ETH/USD, SOL/USD | Configured crypto universe for actionable crypto decisions |
-| `options_enabled` | false | Enable options trading |
-| `crypto_enabled` | false | Enable 24/7 crypto trading |
-| `llm_model` | gpt-4o-mini | Research model (cheap, for bulk analysis) |
-| `llm_analyst_model` | gpt-4o | Analyst model (smart, for trading decisions) |
+
+| Setting                  | Default                   | Description                                                |
+| ------------------------ | ------------------------- | ---------------------------------------------------------- |
+| `max_positions`          | 5                         | Maximum concurrent positions                               |
+| `max_position_value`     | 5000                      | Maximum $ per position                                     |
+| `take_profit_pct`        | 10                        | Take profit percentage                                     |
+| `stop_loss_pct`          | 5                         | Stop loss percentage                                       |
+| `min_sentiment_score`    | 0.3                       | Minimum sentiment to consider                              |
+| `min_analyst_confidence` | 0.6                       | Minimum LLM confidence to trade                            |
+| `crypto_symbols`         | BTC/USD, ETH/USD, SOL/USD | Configured crypto universe for actionable crypto decisions |
+| `options_enabled`        | false                     | Enable options trading                                     |
+| `crypto_enabled`         | false                     | Enable 24/7 crypto trading                                 |
+| `llm_model`              | gpt-4o-mini               | Research model (cheap, for bulk analysis)                  |
+| `llm_analyst_model`      | gpt-4o                    | Analyst model (smart, for trading decisions)               |
+
 
 ### LLM Provider Configuration
 
 MAHORAGA supports multiple LLM providers via three modes:
 
-| Mode | Description | Required Env Vars |
-|------|-------------|-------------------|
-| `openai-raw` | Direct OpenAI API (default) | `OPENAI_API_KEY` |
-| `ai-sdk` | Vercel AI SDK with 5 providers | One or more provider keys |
+
+| Mode                 | Description                     | Required Env Vars                                                                             |
+| -------------------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `openai-raw`         | Direct OpenAI API (default)     | `OPENAI_API_KEY`                                                                              |
+| `ai-sdk`             | Vercel AI SDK with 5 providers  | One or more provider keys                                                                     |
 | `cloudflare-gateway` | Cloudflare AI Gateway (/compat) | `CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID`, `CLOUDFLARE_AI_GATEWAY_ID`, `CLOUDFLARE_AI_GATEWAY_TOKEN` |
+
 
 **Optional OpenAI Base URL Override:**
 
@@ -369,13 +378,15 @@ MAHORAGA supports multiple LLM providers via three modes:
 
 **AI SDK Supported Providers:**
 
-| Provider | Env Var | Example Models |
-|----------|---------|----------------|
-| OpenAI | `OPENAI_API_KEY` | `openai/gpt-4o`, `openai/o1` |
-| Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-4`, `anthropic/claude-opus-4` |
-| Google | `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-2.5-pro`, `google/gemini-2.5-flash` |
-| xAI (Grok) | `XAI_API_KEY` | `xai/grok-4`, `xai/grok-3` |
-| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat`, `deepseek/deepseek-reasoner` |
+
+| Provider   | Env Var                        | Example Models                                         |
+| ---------- | ------------------------------ | ------------------------------------------------------ |
+| OpenAI     | `OPENAI_API_KEY`               | `openai/gpt-4o`, `openai/o1`                           |
+| Anthropic  | `ANTHROPIC_API_KEY`            | `anthropic/claude-sonnet-4`, `anthropic/claude-opus-4` |
+| Google     | `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-2.5-pro`, `google/gemini-2.5-flash`     |
+| xAI (Grok) | `XAI_API_KEY`                  | `xai/grok-4`, `xai/grok-3`                             |
+| DeepSeek   | `DEEPSEEK_API_KEY`             | `deepseek/deepseek-chat`, `deepseek/deepseek-reasoner` |
+
 
 **Example: Using Claude with AI SDK:**
 
@@ -394,23 +405,25 @@ npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
 
 ## API Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `/agent/status` | Full status (account, positions, signals) |
-| `/agent/enable` | Enable the agent |
-| `/agent/disable` | Disable the agent |
-| `/agent/config` | Get or update configuration |
-| `/agent/logs` | Get recent logs |
-| `/agent/history` | Portfolio/equity history snapshots |
-| `/agent/costs` | Aggregated LLM usage and cost totals |
-| `/agent/trigger` | Manually trigger (for testing) |
-| `/agent/experiments` | List experiment runs + active run id |
-| `/agent/experiments/:id` | Get one experiment run with all snapshots |
-| `/agent/experiments/start` | Start a run and capture baseline snapshot |
-| `/agent/experiments/snapshot` | Capture a labeled checkpoint snapshot |
-| `/agent/experiments/stop` | Stop a run (captures final snapshot by default) |
-| `/agent/kill` | Emergency kill switch (uses `KILL_SWITCH_SECRET`) |
-| `/mcp` | MCP server for tool access |
+
+| Endpoint                      | Description                                       |
+| ----------------------------- | ------------------------------------------------- |
+| `/agent/status`               | Full status (account, positions, signals)         |
+| `/agent/enable`               | Enable the agent                                  |
+| `/agent/disable`              | Disable the agent                                 |
+| `/agent/config`               | Get or update configuration                       |
+| `/agent/logs`                 | Get recent logs                                   |
+| `/agent/history`              | Portfolio/equity history snapshots                |
+| `/agent/costs`                | Aggregated LLM usage and cost totals              |
+| `/agent/trigger`              | Manually trigger (for testing)                    |
+| `/agent/experiments`          | List experiment runs + active run id              |
+| `/agent/experiments/:id`      | Get one experiment run with all snapshots         |
+| `/agent/experiments/start`    | Start a run and capture baseline snapshot         |
+| `/agent/experiments/snapshot` | Capture a labeled checkpoint snapshot             |
+| `/agent/experiments/stop`     | Stop a run (captures final snapshot by default)   |
+| `/agent/kill`                 | Emergency kill switch (uses `KILL_SWITCH_SECRET`) |
+| `/mcp`                        | MCP server for tool access                        |
+
 
 ## Per-Change Experiment Loop
 
@@ -445,6 +458,7 @@ curl -H "Authorization: Bearer $MAHORAGA_TOKEN" \
 ```
 
 Snapshot comparisons include threshold checks for:
+
 - no runtime alarm error regression
 - actionable ratio non-decreasing
 - return non-decreasing
@@ -453,6 +467,7 @@ Snapshot comparisons include threshold checks for:
 ## Institutional Signal Rollout (Top 3)
 
 New institutional gatherers are wired but disabled by default:
+
 - `options_flow` (Unusual Whales)
 - `congressional` (FMP House/Senate)
 - `contract_awards` (GovCon)
@@ -464,6 +479,7 @@ New institutional gatherers are wired but disabled by default:
 3. Add `contract_awards_enabled=true` last.
 
 Keep strict caps during rollout:
+
 - `uoa_max_candidates`
 - `congressional_max_candidates`
 - `contract_awards_max_candidates`
@@ -544,15 +560,17 @@ mahoraga/
 
 ## Safety Features
 
-| Feature | Description |
-|---------|-------------|
-| Paper Trading | Start with `ALPACA_PAPER=true` |
-| Kill Switch | Emergency halt via secret |
-| Position Limits | Max positions and $ per position |
-| Daily Loss Limit | Stops trading after 2% daily loss |
-| Staleness Detection | Auto-exit stale positions |
-| No Margin | Cash-only trading |
-| No Shorting | Long positions only |
+
+| Feature             | Description                       |
+| ------------------- | --------------------------------- |
+| Paper Trading       | Start with `ALPACA_PAPER=true`    |
+| Kill Switch         | Emergency halt via secret         |
+| Position Limits     | Max positions and $ per position  |
+| Daily Loss Limit    | Stops trading after 2% daily loss |
+| Staleness Detection | Auto-exit stale positions         |
+| No Margin           | Cash-only trading                 |
+| No Shorting         | Long positions only               |
+
 
 ## Community
 

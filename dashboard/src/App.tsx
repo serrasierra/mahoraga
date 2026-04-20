@@ -10,6 +10,7 @@ import { LineChart, Sparkline } from './components/LineChart'
 import { NotificationBell } from './components/NotificationBell'
 import { Tooltip, TooltipContent } from './components/Tooltip'
 import { getActionabilityView } from './utils/signalActionability'
+import { getApiBase, hasWorkerApiBaseUrl } from './apiBase'
 import type {
   Status,
   Config,
@@ -23,16 +24,11 @@ import type {
   SignalActionability,
 } from './types'
 
-const API_BASE = (import.meta.env.VITE_MAHORAGA_API_BASE || '/api').replace(/\/$/, '')
-
-const HAS_VITE_WORKER_URL = Boolean(
-  typeof import.meta.env.VITE_MAHORAGA_API_BASE === 'string' && import.meta.env.VITE_MAHORAGA_API_BASE.trim() !== ''
-)
-
 /** URL for curl hint: matches what the app targets (Worker URL when built for hosted, else local wrangler port). */
 function getAgentEnableUrlForHint(): string {
-  if (API_BASE.startsWith('http://') || API_BASE.startsWith('https://')) {
-    return `${API_BASE.replace(/\/$/, '')}/enable`
+  const base = getApiBase()
+  if (base.startsWith('http://') || base.startsWith('https://')) {
+    return `${base.replace(/\/$/, '')}/enable`
   }
   const port = import.meta.env.VITE_WRANGLER_PORT || '8787'
   return `http://localhost:${port}/agent/enable`
@@ -43,7 +39,7 @@ function isHostedSiteMissingWorkerUrl(): boolean {
   const h = window.location.hostname
   const isLocal = h === 'localhost' || h === '127.0.0.1'
   if (isLocal) return false
-  return !HAS_VITE_WORKER_URL
+  return !hasWorkerApiBaseUrl()
 }
 
 function getApiToken(): string {
@@ -141,7 +137,7 @@ async function fetchPortfolioHistory(period: string = '1D'): Promise<PortfolioSn
   try {
     const timeframe = period === '1D' ? '15Min' : '1D'
     const intraday = period === '1D' ? '&intraday_reporting=extended_hours' : ''
-    const res = await authFetch(`${API_BASE}/history?period=${period}&timeframe=${timeframe}${intraday}`)
+    const res = await authFetch(`${getApiBase()}/history?period=${period}&timeframe=${timeframe}${intraday}`)
     const data = await res.json()
     if (data.ok && data.data?.snapshots) {
       return data.data.snapshots
@@ -184,7 +180,7 @@ export default function App() {
   useEffect(() => {
     const checkSetup = async () => {
       try {
-        const res = await authFetch(`${API_BASE}/setup/status`)
+        const res = await authFetch(`${getApiBase()}/setup/status`)
         const data = await res.json()
         if (data.ok && !data.data.configured) {
           setShowSetup(true)
@@ -200,7 +196,7 @@ export default function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await authFetch(`${API_BASE}/status`)
+        const res = await authFetch(`${getApiBase()}/status`)
         const data = await res.json()
         if (data.ok) {
           setStatus(data.data)
@@ -230,7 +226,7 @@ export default function App() {
 
     const fetchExperiments = async () => {
       try {
-        const res = await authFetch(`${API_BASE}/experiments`)
+        const res = await authFetch(`${getApiBase()}/experiments`)
         const data = await res.json()
         if (data.ok && data.data) {
           setExperimentSummaries(data.data.experiments || [])
@@ -270,7 +266,7 @@ export default function App() {
 
     const fetchExperimentDetail = async () => {
       try {
-        const res = await authFetch(`${API_BASE}/experiments/${id}`)
+        const res = await authFetch(`${getApiBase()}/experiments/${id}`)
         const data = await res.json()
         if (data.ok) {
           setExperimentRunDetail(data.data || null)
@@ -284,7 +280,7 @@ export default function App() {
   }, [activeExperimentId, experimentSummaries])
 
   const handleSaveConfig = async (config: Config) => {
-    const res = await authFetch(`${API_BASE}/config`, {
+    const res = await authFetch(`${getApiBase()}/config`, {
       method: 'POST',
       body: JSON.stringify(config),
     })
@@ -455,25 +451,26 @@ export default function App() {
               <div className="text-hud-text-dim text-xs text-left space-y-3">
                 {isHostedSiteMissingWorkerUrl() ? (
                   <p className="bg-hud-panel border border-hud-warning/40 p-3 text-[11px] leading-relaxed">
-                    <span className="text-hud-warning font-semibold block mb-1">Hosted build missing API URL</span>
-                    This Pages build was compiled without{' '}
-                    <code className="text-hud-primary">VITE_MAHORAGA_API_BASE</code>, so the UI calls{' '}
-                    <code className="text-hud-primary">/api</code> on this hostname (which is not your Worker). In Cloudflare
-                    Pages → Settings → Environment variables, set{' '}
-                    <code className="text-hud-primary">VITE_MAHORAGA_API_BASE</code> to{' '}
-                    <code className="text-hud-primary break-all">https://&lt;your-worker&gt;.workers.dev/agent</code> for{' '}
-                    <strong>Preview</strong> and <strong>Production</strong>, then redeploy.
+                    <span className="text-hud-warning font-semibold block mb-1">Hosted site missing Worker API URL</span>
+                    Set <code className="text-hud-primary">VITE_MAHORAGA_API_BASE</code> (or{' '}
+                    <code className="text-hud-primary">MAHORAGA_PUBLIC_API_BASE</code>) in Cloudflare Pages → Settings →
+                    Variables to <code className="text-hud-primary break-all">https://&lt;your-worker&gt;.workers.dev/agent</code>{' '}
+                    for <strong>Preview</strong> and <strong>Production</strong>, then redeploy. The Pages Function{' '}
+                    <code className="text-hud-primary">/mahoraga-runtime-config</code> reads those values at runtime.
                   </p>
                 ) : null}
                 <p>
                   <span className="block text-[10px] text-hud-text-dim mb-1">API base for this build</span>
                   <code className="text-hud-primary break-all text-[11px] block">
-                    {API_BASE.startsWith('http')
-                      ? API_BASE
-                      : typeof window !== 'undefined' &&
-                          (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-                        ? `${API_BASE} (Vite) → http://localhost:${import.meta.env.VITE_WRANGLER_PORT || '8787'}/agent`
-                        : `${API_BASE} — no dev proxy on this host; set VITE_MAHORAGA_API_BASE to your Worker /agent URL`}
+                    {(() => {
+                      const base = getApiBase()
+                      return base.startsWith('http')
+                        ? base
+                        : typeof window !== 'undefined' &&
+                            (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                          ? `${base} (Vite) → http://localhost:${import.meta.env.VITE_WRANGLER_PORT || '8787'}/agent`
+                          : `${base} — no dev proxy on this host; set Pages variables above`
+                    })()}
                   </code>
                 </p>
                 <p>
