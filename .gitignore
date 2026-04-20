@@ -9,8 +9,8 @@
 .env
 .env.*
 !.env.example
-wrangler.jsonc
-!wrangler.example.jsonc
+
+# wrangler.jsonc is committed (solo deploy). Secrets stay in `wrangler secret` / Cloudflare dashboard.
 
 # Agent runtime files (contain personal trading data)
 agent-config.json

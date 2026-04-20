@@ -8,8 +8,6 @@ An autonomous, LLM-powered trading agent that runs 24/7 on Cloudflare Workers.
 
 MAHORAGA monitors social sentiment from StockTwits and Reddit, ingests optional Polygon news catalysts, uses AI (OpenAI, Anthropic, Google, xAI, DeepSeek via AI SDK) to analyze signals, and executes trades through Alpaca. It runs as a Cloudflare Durable Object with persistent state, automatic restarts, and 24/7 crypto trading support.
 
-
-
 ## Features
 
 - **24/7 Operation** — Runs on Cloudflare Workers, no local machine required
@@ -157,10 +155,10 @@ The React dashboard (monitoring + experiments) is a **static site** on **Cloudfl
 ### Deploy map (what happens on `git push`)
 
 
-| Piece                               | What deploys it                       | When                                                                                                         |
-| ----------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Secrets: `**CLOUDFLARE_API_TOKEN**` plus either `**WRANGLER_JSONC**` (full local `wrangler.jsonc` body) or `**D1_DATABASE_ID**` + `**KV_NAMESPACE_ID**` + `**KV_PREVIEW_NAMESPACE_ID**`, or commit `wrangler.jsonc`. |
-| **Dashboard** (`dashboard/`)        | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below). |
+| Piece                               | What deploys it                       | When                                                                                                                                                                                                                                                    |
+| ----------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Repo includes `[wrangler.jsonc](wrangler.jsonc)`; CI only needs `**CLOUDFLARE_API_TOKEN**` (optional: `**CLOUDFLARE_ACCOUNT_ID**`). Without a committed config, use `**WRANGLER_JSONC**` or D1/KV secrets per workflow. |
+| **Dashboard** (`dashboard/`)        | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below).                                                                                                                                            |
 
 
 Pushing to `main` updates **both**, but through **two** pipelines—by design. The dashboard does **not** use `wrangler pages deploy` in CI in this workflow (avoids double-deploying the same site).
@@ -177,7 +175,7 @@ If the Pages app shows **No Git connection**, it was deployed by **direct upload
   - **Build command:** `npm run build`
   - **Build output directory:** `dist`
 4. **Environment variables** (same settings area → **Variables and Secrets**):
-  - `**VITE_MAHORAGA_API_BASE**` = `https://<your-worker-subdomain>.workers.dev/agent` (build-time; also read by the Pages Function `/mahoraga-runtime-config` at runtime if the bundle did not embed it).
+  - `**VITE_MAHORAGA_API_BASE`** = `https://<your-worker-subdomain>.workers.dev/agent` (build-time; also read by the Pages Function `/mahoraga-runtime-config` at runtime if the bundle did not embed it).
   - Optionally set `**MAHORAGA_PUBLIC_API_BASE**` to the same URL (non-`VITE_` alias for that function).
   - Apply to **Production** and **Preview** (Preview builds use Preview env; they do not inherit Production-only vars).
 
@@ -187,7 +185,7 @@ Repo hints: optional `[dashboard/wrangler.toml](dashboard/wrangler.toml)` (`name
 
 ### 2) `VITE_MAHORAGA_API_BASE` (required for hosted builds)
 
-Use `[dashboard/env.example](dashboard/env.example)` as reference. The value must include `**https://`**, your Worker host, and the `**/agent**` path:
+Use `[dashboard/env.example](dashboard/env.example)` as reference. The value must include `**https://`**, your Worker host, and the `**/agent`** path:
 
 ```bash
 VITE_MAHORAGA_API_BASE=https://your-worker-subdomain.workers.dev/agent

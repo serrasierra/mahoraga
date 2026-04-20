@@ -58,7 +58,7 @@ jobs:
       - name: Build worker (TypeScript)
         run: npm run build
 
-      - name: Prepare Wrangler config (CI has no gitignored wrangler.jsonc)
+      - name: Prepare Wrangler config (fallback if wrangler.jsonc missing)
         run: |
           set -euo pipefail
           if [ -f wrangler.jsonc ]; then
