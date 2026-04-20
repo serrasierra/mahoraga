@@ -10,7 +10,7 @@
 .env.*
 !.env.example
 
-# wrangler.jsonc is committed (solo deploy). Secrets stay in `wrangler secret` / Cloudflare dashboard.
+# mahoraga.worker.jsonc is committed (solo deploy). Secrets stay in `wrangler secret -c mahoraga.worker.jsonc` / Cloudflare dashboard.
 
 # Agent runtime files (contain personal trading data)
 agent-config.json

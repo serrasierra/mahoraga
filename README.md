@@ -43,34 +43,36 @@ npm install
 ```bash
 # Create D1 database
 npx wrangler d1 create mahoraga-db
-# Copy the database_id to wrangler.jsonc
+# Copy the database_id to mahoraga.worker.jsonc
 
 # Create KV namespace
 npx wrangler kv namespace create CACHE
-# Copy the id to wrangler.jsonc
+# Copy the id to mahoraga.worker.jsonc
 
 # Run migrations
-npx wrangler d1 migrations apply mahoraga-db
+npx wrangler d1 migrations apply mahoraga-db -c mahoraga.worker.jsonc
 ```
 
 ### 3. Set secrets
 
+Repo root has **`wrangler.toml`** for **Cloudflare Pages** (Git builds). The Worker lives in **`mahoraga.worker.jsonc`**. Add **`-c mahoraga.worker.jsonc`** to every Worker `wrangler` command below (or use `npm run deploy` / `npm run dev`, which pass it for you).
+
 ```bash
 # Required
-npx wrangler secret put ALPACA_API_KEY
-npx wrangler secret put ALPACA_API_SECRET
+npx wrangler secret put ALPACA_API_KEY -c mahoraga.worker.jsonc
+npx wrangler secret put ALPACA_API_SECRET -c mahoraga.worker.jsonc
 
 # API Authentication - generate a secure random token (64+ chars recommended)
 # Example: openssl rand -base64 48
-npx wrangler secret put MAHORAGA_API_TOKEN
+npx wrangler secret put MAHORAGA_API_TOKEN -c mahoraga.worker.jsonc
 
 # LLM Provider (choose one mode)
-npx wrangler secret put LLM_PROVIDER  # "openai-raw" (default), "ai-sdk", or "cloudflare-gateway"
-npx wrangler secret put LLM_MODEL     # e.g. "gpt-4o-mini" or "anthropic/claude-sonnet-4"
+npx wrangler secret put LLM_PROVIDER -c mahoraga.worker.jsonc  # "openai-raw" (default), "ai-sdk", or "cloudflare-gateway"
+npx wrangler secret put LLM_MODEL -c mahoraga.worker.jsonc     # e.g. "gpt-4o-mini" or "anthropic/claude-sonnet-4"
 
 # LLM API Keys (based on provider mode)
-npx wrangler secret put OPENAI_API_KEY         # For openai-raw or ai-sdk with OpenAI
-npx wrangler secret put OPENAI_BASE_URL        # Optional: override OpenAI base URL for openai-raw and ai-sdk (OpenAI models)
+npx wrangler secret put OPENAI_API_KEY -c mahoraga.worker.jsonc         # For openai-raw or ai-sdk with OpenAI
+npx wrangler secret put OPENAI_BASE_URL -c mahoraga.worker.jsonc        # Optional: override OpenAI base URL for openai-raw and ai-sdk (OpenAI models)
 # npx wrangler secret put ANTHROPIC_API_KEY    # For ai-sdk with Anthropic
 # npx wrangler secret put GOOGLE_GENERATIVE_AI_API_KEY  # For ai-sdk with Google
 # npx wrangler secret put XAI_API_KEY          # For ai-sdk with xAI/Grok
@@ -80,18 +82,18 @@ npx wrangler secret put OPENAI_BASE_URL        # Optional: override OpenAI base 
 # npx wrangler secret put CLOUDFLARE_AI_GATEWAY_TOKEN       # For cloudflare-gateway
 
 # Optional
-npx wrangler secret put ALPACA_PAPER         # "true" for paper trading (recommended)
-npx wrangler secret put TWITTER_BEARER_TOKEN
-npx wrangler secret put POLYGON_API_KEY      # Optional: enables polygon_news gatherer
-npx wrangler secret put UNUSUAL_WHALES_API_KEY  # Optional: enables options_flow gatherer
-npx wrangler secret put FMP_API_KEY             # Optional: enables congressional gatherer
-npx wrangler secret put GOVCON_API_KEY          # Optional: enables contract_awards gatherer
+npx wrangler secret put ALPACA_PAPER -c mahoraga.worker.jsonc         # "true" for paper trading (recommended)
+npx wrangler secret put TWITTER_BEARER_TOKEN -c mahoraga.worker.jsonc
+npx wrangler secret put POLYGON_API_KEY -c mahoraga.worker.jsonc      # Optional: enables polygon_news gatherer
+npx wrangler secret put UNUSUAL_WHALES_API_KEY -c mahoraga.worker.jsonc  # Optional: enables options_flow gatherer
+npx wrangler secret put FMP_API_KEY -c mahoraga.worker.jsonc             # Optional: enables congressional gatherer
+npx wrangler secret put GOVCON_API_KEY -c mahoraga.worker.jsonc          # Optional: enables contract_awards gatherer
 # Free-tier signal bundle (optional; enable via config toggles — all off by default)
-npx wrangler secret put FINNHUB_API_KEY         # Optional: enables finnhub_bundle gatherer (market news)
-npx wrangler secret put FRED_API_KEY            # Optional: enables fred_macro gatherer (SPY/QQQ macro bias)
+npx wrangler secret put FINNHUB_API_KEY -c mahoraga.worker.jsonc         # Optional: enables finnhub_bundle gatherer (market news)
+npx wrangler secret put FRED_API_KEY -c mahoraga.worker.jsonc            # Optional: enables fred_macro gatherer (SPY/QQQ macro bias)
 # Crypto Fear & Greed (alternative.me) uses no API key — enable with crypto_fng_enabled only
-npx wrangler secret put DISCORD_WEBHOOK_URL
-npx wrangler secret put KILL_SWITCH_SECRET   # Emergency kill switch (separate from API token)
+npx wrangler secret put DISCORD_WEBHOOK_URL -c mahoraga.worker.jsonc
+npx wrangler secret put KILL_SWITCH_SECRET -c mahoraga.worker.jsonc   # Emergency kill switch (separate from API token)
 ```
 
 **Free-tier bundle (quota-safe):** Use KV-backed caching (`CACHE` binding) and conservative TTLs: **F&G** ~900–1800s, **Finnhub** ~180–300s, **FRED** ~1–6h. **Staged activation:** (1) `crypto_fng_enabled` only → run an experiment snapshot; (2) add `finnhub_enabled` + Finnhub key → snapshot; (3) add `fred_enabled` + FRED key → snapshot. On HTTP **429**, gatherers backoff with jitter and fall back to cached JSON when available; otherwise they emit no signals (no cycle-breaking throws). Tune TTLs if you see repeated rate limits.
@@ -99,7 +101,8 @@ npx wrangler secret put KILL_SWITCH_SECRET   # Emergency kill switch (separate f
 ### 4. Deploy
 
 ```bash
-npx wrangler deploy
+npm run deploy
+# or: npx wrangler deploy -c mahoraga.worker.jsonc
 ```
 
 ### 5. Enable the agent
@@ -157,7 +160,7 @@ The React dashboard (monitoring + experiments) is a **static site** on **Cloudfl
 
 | Piece                               | What deploys it                       | When                                                                                                                                                                                                                                                    |
 | ----------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Repo includes `[wrangler.jsonc](wrangler.jsonc)`. Actions secrets: `**CLOUDFLARE_API_TOKEN**` plus `**CLOUDFLARE_ACCOUNT_ID**` (32-char hex; avoids `/memberships` **9106** with account-scoped tokens). Or use a **Profile → API Tokens** user token with the Workers template. |
+| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Worker config: `[mahoraga.worker.jsonc](mahoraga.worker.jsonc)`. Actions secrets: `**CLOUDFLARE_API_TOKEN**` plus `**CLOUDFLARE_ACCOUNT_ID**` (32-char hex; avoids `/memberships` **9106** with account-scoped tokens). Or use a **Profile → API Tokens** user token with the Workers template. |
 | **Dashboard** (`dashboard/`)        | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below).                                                                                                                                            |
 
 
@@ -181,7 +184,7 @@ If the Pages app shows **No Git connection**, it was deployed by **direct upload
 
 After the first successful build from Git, the UI should show the Git connection. **Pull requests** get **Preview** URLs automatically.
 
-Repo hints: `[dashboard/wrangler.toml](dashboard/wrangler.toml)` sets `pages_build_output_dir` and **`[vars].MAHORAGA_PUBLIC_API_BASE`** so the `/mahoraga-runtime-config` Pages Function can return your Worker URL even when Pages build-time `VITE_*` injection is flaky—edit that URL if your Worker hostname changes. **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
+Repo hints: **`[wrangler.toml](wrangler.toml)`** at the repo root is what **Git-connected Pages** reads when it validates Wrangler from the monorepo root (so `pages_build_output_dir` and **`[vars].MAHORAGA_PUBLIC_API_BASE`** apply to `/mahoraga-runtime-config`). **`[dashboard/wrangler.toml](dashboard/wrangler.toml)`** is the same for local `wrangler pages dev` from `dashboard/`—keep **`MAHORAGA_PUBLIC_API_BASE`** in sync. Edit the URL if your Worker hostname changes. **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
 
 ### 2) `VITE_MAHORAGA_API_BASE` (required for hosted builds)
 
@@ -389,9 +392,9 @@ MAHORAGA supports multiple LLM providers via three modes:
 **Example: Using Claude with AI SDK:**
 
 ```bash
-npx wrangler secret put LLM_PROVIDER      # Set to "ai-sdk"
-npx wrangler secret put LLM_MODEL         # Set to "anthropic/claude-sonnet-4"
-npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
+npx wrangler secret put LLM_PROVIDER -c mahoraga.worker.jsonc      # Set to "ai-sdk"
+npx wrangler secret put LLM_MODEL -c mahoraga.worker.jsonc         # Set to "anthropic/claude-sonnet-4"
+npx wrangler secret put ANTHROPIC_API_KEY -c mahoraga.worker.jsonc # Your Anthropic API key
 ```
 
 ### Actionable Signal Notes
@@ -399,7 +402,7 @@ npx wrangler secret put ANTHROPIC_API_KEY # Your Anthropic API key
 - `signals` in status can include raw social candidates for observability.
 - Trade decisions and signal-level LLM research use the actionable subset only.
 - A symbol is actionable when Mahoraga can resolve a tradable Alpaca instrument and fetch a non-zero latest price.
-- Cloudflare deployments with high symbol fanout should keep code-level actionability caps/dedupe enabled; `wrangler.jsonc` can also set `limits.subrequests` as a fallback guardrail.
+- Cloudflare deployments with high symbol fanout should keep code-level actionability caps/dedupe enabled; `mahoraga.worker.jsonc` can also set `limits.subrequests` as a fallback guardrail.
 
 ## API Endpoints
 
@@ -528,7 +531,8 @@ This creates a Cloudflare Access Application with email verification or One-Time
 
 ```
 mahoraga/
-├── wrangler.jsonc              # Cloudflare Workers config
+├── wrangler.toml               # Cloudflare Pages (repo root; Git builds)
+├── mahoraga.worker.jsonc       # Cloudflare Worker (API) config
 ├── src/
 │   ├── index.ts                # Entry point & routing
 │   ├── core/

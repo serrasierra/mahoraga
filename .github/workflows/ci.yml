@@ -58,29 +58,29 @@ jobs:
       - name: Build worker (TypeScript)
         run: npm run build
 
-      - name: Prepare Wrangler config (fallback if wrangler.jsonc missing)
+      - name: Prepare Wrangler config (fallback if mahoraga.worker.jsonc missing)
         run: |
           set -euo pipefail
-          if [ -f wrangler.jsonc ]; then
-            echo "Using committed wrangler.jsonc"
+          if [ -f mahoraga.worker.jsonc ]; then
+            echo "Using committed mahoraga.worker.jsonc"
             exit 0
           fi
           if [ -n "${WRANGLER_JSONC:-}" ]; then
-            echo "$WRANGLER_JSONC" > wrangler.jsonc
-            echo "Wrote wrangler.jsonc from WRANGLER_JSONC secret"
+            echo "$WRANGLER_JSONC" > mahoraga.worker.jsonc
+            echo "Wrote mahoraga.worker.jsonc from WRANGLER_JSONC secret"
             exit 0
           fi
           if [ -n "${D1_DATABASE_ID:-}" ] && [ -n "${KV_NAMESPACE_ID:-}" ] && [ -n "${KV_PREVIEW_NAMESPACE_ID:-}" ]; then
-            cp wrangler.example.jsonc wrangler.jsonc
+            cp mahoraga.worker.example.jsonc mahoraga.worker.jsonc
             sed -i \
               -e "s|<YOUR_D1_DATABASE_ID>|${D1_DATABASE_ID}|g" \
               -e "s|<YOUR_KV_NAMESPACE_ID>|${KV_NAMESPACE_ID}|g" \
               -e "s|<YOUR_KV_PREVIEW_NAMESPACE_ID>|${KV_PREVIEW_NAMESPACE_ID}|g" \
-              wrangler.jsonc
-            echo "Wrote wrangler.jsonc from D1/KV secrets"
+              mahoraga.worker.jsonc
+            echo "Wrote mahoraga.worker.jsonc from D1/KV secrets"
             exit 0
           fi
-          echo "::error::Add one of: (1) committed wrangler.jsonc, (2) Actions secret WRANGLER_JSONC (full file contents from your machine), or (3) secrets D1_DATABASE_ID + KV_NAMESPACE_ID + KV_PREVIEW_NAMESPACE_ID."
+          echo "::error::Add one of: (1) committed mahoraga.worker.jsonc, (2) Actions secret WRANGLER_JSONC (full file contents from your machine), or (3) secrets D1_DATABASE_ID + KV_NAMESPACE_ID + KV_PREVIEW_NAMESPACE_ID."
           exit 1
         env:
           WRANGLER_JSONC: ${{ secrets.WRANGLER_JSONC }}

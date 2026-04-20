@@ -33,7 +33,7 @@ Notes
   Then restart npm run dev. Or request a higher limit at platform.openai.com/account/limits
 - Raw social symbols may appear in UI even when not tradable; Mahoraga now filters
   non-actionable symbols (no tradability/price) out of LLM research and trade decisions.
-- Cloudflare runtime note: high-signal cycles can hit subrequest caps; keep actionability dedupe/caps on, and use `wrangler.jsonc` `limits.subrequests` as a fallback guardrail.
+- Cloudflare runtime note: high-signal cycles can hit subrequest caps; keep actionability dedupe/caps on, and use `mahoraga.worker.jsonc` `limits.subrequests` as a fallback guardrail.
 - .dev.vars is gitignored; never commit it.
 - If Alpaca or OpenAI returns errors, read npm run local:logs and the Terminal A output.
 - Upstream updates: git fetch upstream && git merge upstream/main (on main)

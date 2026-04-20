@@ -1,3 +1,4 @@
+# Local `wrangler pages dev` from this directory. Git-connected Pages also loads repo-root wrangler.toml; keep [vars] aligned.
 name = "mahoraga-dashboard"
 compatibility_date = "2026-04-11"
 pages_build_output_dir = "dist"

@@ -1,0 +1,9 @@
+# Cloudflare Pages reads wrangler config from the repository root during Git builds.
+# Worker (Mahoraga API) config is mahoraga.worker.jsonc — use `npm run dev` / `npm run deploy` or `wrangler -c mahoraga.worker.jsonc`.
+# Keep [vars] in sync with dashboard/wrangler.toml (used when developing from dashboard/).
+name = "mahoraga-dashboard"
+compatibility_date = "2026-04-11"
+pages_build_output_dir = "dashboard/dist"
+
+[vars]
+MAHORAGA_PUBLIC_API_BASE = "https://mahoraga.cjserra30.workers.dev/agent"
