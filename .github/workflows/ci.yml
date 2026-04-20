@@ -95,6 +95,9 @@ jobs:
             echo "::error::Set the GitHub Actions repository secret CLOUDFLARE_API_TOKEN (Workers: Edit Cloudflare API token with Workers Scripts:Edit)."
             exit 1
           fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::notice::CLOUDFLARE_ACCOUNT_ID is unset. Account-scoped tokens often fail on /memberships with code 9106 until you add this secret (32-char hex: Workers & Pages → any project → Overview sidebar, or https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/). Alternatively use an API token from Profile → API Tokens (user token) with the Workers template."
+          fi
           npm run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

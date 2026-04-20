@@ -157,7 +157,7 @@ The React dashboard (monitoring + experiments) is a **static site** on **Cloudfl
 
 | Piece                               | What deploys it                       | When                                                                                                                                                                                                                                                    |
 | ----------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Repo includes `[wrangler.jsonc](wrangler.jsonc)`; CI only needs `**CLOUDFLARE_API_TOKEN**` (optional: `**CLOUDFLARE_ACCOUNT_ID**`). Without a committed config, use `**WRANGLER_JSONC**` or D1/KV secrets per workflow. |
+| **Worker** (`src/`, Durable Object) | GitHub Actions on `**main`**          | After CI passes: `npm run deploy`. Repo includes `[wrangler.jsonc](wrangler.jsonc)`. Actions secrets: `**CLOUDFLARE_API_TOKEN**` plus `**CLOUDFLARE_ACCOUNT_ID**` (32-char hex; avoids `/memberships` **9106** with account-scoped tokens). Or use a **Profile → API Tokens** user token with the Workers template. |
 | **Dashboard** (`dashboard/`)        | **Cloudflare Pages** (build from Git) | On push: Cloudflare runs `npm run build` in `dashboard/` and publishes `dist`. Configure once (steps below).                                                                                                                                            |
 
 
@@ -181,7 +181,7 @@ If the Pages app shows **No Git connection**, it was deployed by **direct upload
 
 After the first successful build from Git, the UI should show the Git connection. **Pull requests** get **Preview** URLs automatically.
 
-Repo hints: optional `[dashboard/wrangler.toml](dashboard/wrangler.toml)` (`name` / `pages_build_output_dir`). **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
+Repo hints: `[dashboard/wrangler.toml](dashboard/wrangler.toml)` sets `pages_build_output_dir` and **`[vars].MAHORAGA_PUBLIC_API_BASE`** so the `/mahoraga-runtime-config` Pages Function can return your Worker URL even when Pages build-time `VITE_*` injection is flaky—edit that URL if your Worker hostname changes. **SPA routing:** do not add a root `404.html`—Pages then treats the site as an SPA and maps unknown paths to `/` ([Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)). Do not use `_redirects` to proxy `/api` to an external Worker ([proxying must be relative](https://developers.cloudflare.com/pages/configuration/redirects/#proxying)); the browser calls the Worker using `VITE_MAHORAGA_API_BASE`.
 
 ### 2) `VITE_MAHORAGA_API_BASE` (required for hosted builds)
 

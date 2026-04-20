@@ -1,3 +1,7 @@
 name = "mahoraga-dashboard"
 compatibility_date = "2026-04-11"
 pages_build_output_dir = "dist"
+
+# Read by Pages Functions at runtime (e.g. /mahoraga-runtime-config). Change if your Worker URL changes.
+[vars]
+MAHORAGA_PUBLIC_API_BASE = "https://mahoraga.cjserra30.workers.dev/agent"
